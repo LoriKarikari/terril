@@ -18,6 +18,8 @@ type Plan struct {
 	Assets   []string
 	Stages   []Stage
 	Runtime  Runtime
+	// Names of variables the build steps read. Their values never reach the image.
+	BuildEnv []string
 }
 
 type Runtime struct {
@@ -40,9 +42,12 @@ type Stage struct {
 type Step interface{ dockerfile() string }
 
 type Run struct {
-	Cmd    string
-	Caches []string
+	Cmd     string
+	Caches  []string
+	Secrets []string
 }
+
+type Arg string
 
 type Copy struct {
 	From    string
@@ -68,6 +73,9 @@ func (r Run) dockerfile() string {
 	for _, c := range r.Caches {
 		fmt.Fprintf(&b, "--mount=type=cache,target=%s ", c)
 	}
+	for _, s := range r.Secrets {
+		fmt.Fprintf(&b, "--mount=type=secret,id=%s,env=%s ", s, s)
+	}
 	b.WriteString(r.Cmd)
 	return b.String()
 }
@@ -91,6 +99,8 @@ func (c Copy) dockerfile() string {
 func (f File) dockerfile() string {
 	return "COPY <<'EOF' " + f.Path + "\n" + f.Content + "EOF"
 }
+
+func (a Arg) dockerfile() string { return "ARG " + string(a) }
 
 func (e Env) dockerfile() string  { return fmt.Sprintf("ENV %s=%q", e.Key, e.Value) }
 func (u User) dockerfile() string { return "USER " + string(u) }
@@ -138,7 +148,12 @@ func (p *Plan) Dockerfile() string {
 	var b strings.Builder
 	b.WriteString("# syntax=docker/dockerfile:1\n")
 	fmt.Fprintf(&b, "# wolkpack: %s\n", p.Summary())
-	for _, s := range append(p.Stages, p.Runtime.stage()) {
+	stages := make([]Stage, len(p.Stages))
+	for i, s := range p.Stages {
+		s.Steps = withBuildEnv(s.Steps, p.BuildEnv)
+		stages[i] = s
+	}
+	for _, s := range append(stages, p.Runtime.stage()) {
 		workdir := "/app"
 		if s.Workdir != "" {
 			workdir = s.Workdir
@@ -149,6 +164,37 @@ func (p *Plan) Dockerfile() string {
 		}
 	}
 	return b.String()
+}
+
+// BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.
+const BuildEnvArg = "WOLKPACK_BUILD_ENV"
+
+// Secret mounts don't invalidate Docker's cache, so BuildEnvArg goes in right after the source copy.
+func withBuildEnv(steps []Step, names []string) []Step {
+	if len(names) == 0 {
+		return steps
+	}
+	out := make([]Step, 0, len(steps)+1)
+	argAt := 0
+	for i, step := range steps {
+		if c, ok := step.(Copy); ok && c.From == "" && len(c.Src) == 1 && c.Src[0] == "." {
+			argAt = i + 1
+		}
+	}
+	for i, step := range steps {
+		if i == argAt {
+			out = append(out, Arg(BuildEnvArg))
+		}
+		if r, ok := step.(Run); ok {
+			r.Secrets = names
+			step = r
+		}
+		out = append(out, step)
+	}
+	if argAt == len(steps) {
+		out = append(out, Arg(BuildEnvArg))
+	}
+	return out
 }
 
 func (p *Plan) Summary() string {

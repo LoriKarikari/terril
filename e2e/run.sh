@@ -35,10 +35,24 @@ for name in "${names[@]}"; do
     continue
   fi
 
+  env_args=() stale_args=() values=() secrets=()
+  if [ -f "e2e/testdata/$name/build-env" ]; then
+    while read -r line; do
+      kv=${line#secret }
+      env_args+=(--env "$kv")
+      stale_args+=(--env "${kv%%=*}=stale-${kv%%=*}")
+      values+=("${kv#*=}")
+      [ "$kv" != "$line" ] && secrets+=("${kv#*=}")
+    done <"e2e/testdata/$name/build-env"
+  fi
+
   mkdir -p "$dir/host-artifacts/node_modules" "$dir/host-artifacts/__pycache__"
   touch "$dir/host-artifacts/node_modules/HOST_MARKER" "$dir/host-artifacts/__pycache__/HOST_MARKER"
-  bin/wolkpack build -t "$image" "$dir" >"$log" 2>&1
-  status=$?
+  status=0
+  if [ ${#env_args[@]} -gt 0 ]; then
+    bin/wolkpack build "${stale_args[@]}" -t "$image" "$dir" >"$log" 2>&1 || status=$?
+  fi
+  [ $status -eq 0 ] && { bin/wolkpack build "${env_args[@]}" -t "$image" "$dir" >>"$log" 2>&1 || status=$?; }
   rm -rf "$dir/host-artifacts"
   if [ $status -ne 0 ]; then
     record "$name" FAIL - - - "build failed, see $log"
@@ -59,6 +73,19 @@ for name in "${names[@]}"; do
   fi
   if [ -n "$shipped" ]; then
     record "$name" FAIL - - - "image ships packages it shouldn't:$shipped"
+    continue
+  fi
+  meta=$(docker history --no-trunc "$image"; docker image inspect "$image")
+  leaked=""
+  for v in "${values[@]}"; do grep -qF -- "$v" <<<"$meta" && leaked="$leaked '$v'"; done
+  if [ ${#secrets[@]} -gt 0 ]; then
+    cid=$(docker create "$image")
+    content=$(docker export "$cid" | tar -xO 2>/dev/null | tr -d '\0')
+    docker rm "$cid" >/dev/null
+    for v in "${secrets[@]}"; do grep -qF -- "$v" <<<"$content" && leaked="$leaked '$v'"; done
+  fi
+  if [ -n "$leaked" ]; then
+    record "$name" FAIL - - - "build env value in the image:$leaked"
     continue
   fi
   provider=$(bin/wolkpack plan "$dir" | sed -n 's/^# wolkpack: //p')

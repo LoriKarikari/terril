@@ -58,6 +58,22 @@ A folder with only an `index.html`, or a Vite app with no `start` script, is ser
 
 If a Python or Go app has a `package.json` with a `build` script, Node runs that script first. The final image doesn't include Node. For Django apps that set `STATIC_ROOT`, wolkpack then runs `collectstatic`.
 
+## Build-time variables
+
+Some builds need values that aren't in the repo, such as `VITE_API_URL` or a token for a private package registry. Pass each one with `--env`:
+
+```sh
+wolkpack build --env VITE_API_URL=https://api.example.com ./my-app
+```
+
+Without `=VALUE`, wolkpack takes the value from your environment:
+
+```sh
+NPM_TOKEN=... wolkpack build --env NPM_TOKEN ./my-app
+```
+
+The build steps can read these variables, but the running app can't, and the values aren't stored in the image. When a value changes, wolkpack rebuilds the steps that read it. Set runtime variables when you start the container, for example with `docker run -e`.
+
 ## Monorepos
 
 Point wolkpack at one app in a JavaScript workspace:

@@ -1,0 +1,2 @@
+GREETING=hello from build env
+secret NPM_TOKEN=tok-9f8e7d6c
