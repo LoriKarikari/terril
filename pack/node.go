@@ -29,6 +29,7 @@ type nodeManager struct {
 	install, frozen     string
 	prune, cache        string
 	run, start, runFile string
+	exec                string
 }
 
 var corepackYarn = func(*Node) []Step {
@@ -43,7 +44,7 @@ var nodeManagers = map[string]nodeManager{
 	"npm": {
 		image: nodeImage, install: "npm install", frozen: "npm ci",
 		prune: "npm prune --omit=dev", cache: "/root/.npm",
-		run: "npm run", start: "npm start", runFile: "node",
+		run: "npm run", start: "npm start", runFile: "node", exec: "npx",
 	},
 	"pnpm": {
 		image: nodeImage,
@@ -56,13 +57,13 @@ var nodeManagers = map[string]nodeManager{
 		},
 		install: "pnpm install", frozen: "pnpm install --frozen-lockfile",
 		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
-		run: "pnpm run", start: "npm start", runFile: "node",
+		run: "pnpm run", start: "npm start", runFile: "node", exec: "pnpm exec",
 	},
 	"yarn": {
 		image: nodeImage, setup: corepackYarn,
 		install: "yarn install", frozen: "yarn install --frozen-lockfile",
 		prune: "yarn install --production --frozen-lockfile --ignore-scripts --prefer-offline", cache: "/usr/local/share/.cache/yarn",
-		run: "yarn run", start: "npm start", runFile: "node",
+		run: "yarn run", start: "npm start", runFile: "node", exec: "yarn",
 	},
 	"yarn-berry": {
 		image: nodeImage,
@@ -72,7 +73,7 @@ var nodeManagers = map[string]nodeManager{
 		},
 		install: "yarn install", frozen: "yarn install --immutable",
 		prune: "yarn workspaces focus --all --production",
-		run:   "yarn run", start: "npm start", runFile: "node",
+		run:   "yarn run", start: "npm start", runFile: "node", exec: "yarn",
 	},
 	"bun": {
 		image: func(n *Node) (string, error) {
@@ -84,7 +85,7 @@ var nodeManagers = map[string]nodeManager{
 		},
 		install: "bun install", frozen: "bun install --frozen-lockfile",
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
-		run: "bun run", start: "bun run start", runFile: "bun",
+		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
 	},
 }
 
@@ -120,11 +121,25 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 	if m.setup != nil {
 		steps = append(steps, m.setup(n)...)
 	}
-	manifests := []string{"package.json"}
 	install := m.install
 	if n.Lockfile != "" {
-		manifests = append(manifests, n.Lockfile)
 		install = m.frozen
+	}
+	if f.Workspace != nil {
+		build, err := workspaceBuild(f, m)
+		if err != nil {
+			return Stage{}, err
+		}
+		// Every member's package.json feeds the install, so the whole repo goes in first.
+		steps = append(steps, copySource(), Run{Cmd: install, Caches: m.caches()})
+		if build != "" {
+			steps = append(steps, Run{Cmd: build})
+		}
+		return Stage{Name: name, From: image, Steps: steps}, nil
+	}
+	manifests := []string{"package.json"}
+	if n.Lockfile != "" {
+		manifests = append(manifests, n.Lockfile)
 	}
 	if f.Has(".yarnrc.yml") {
 		manifests = append(manifests, ".yarnrc.yml")
@@ -142,6 +157,22 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 		steps = append(steps, Run{Cmd: m.prune, Caches: m.caches()})
 	}
 	return Stage{Name: name, From: image, Steps: steps}, nil
+}
+
+func workspaceBuild(f *Facts, m nodeManager) (string, error) {
+	name := f.Node.Package.Name
+	if name == "" {
+		return "", fmt.Errorf("%s/package.json has no name, which workspace tools need to select it", f.Workspace.App)
+	}
+	switch {
+	case f.rootHas("turbo.json"):
+		return m.exec + " turbo run build --filter=" + shellQuote([]string{name}), nil
+	case f.Node.Manager == "pnpm":
+		return "pnpm --filter " + shellQuote([]string{name + "..."}) + " run build", nil
+	case f.Node.Package.Scripts["build"] != "":
+		return "cd " + shellQuote([]string{f.Workspace.App}) + " && " + m.run + " build", nil
+	}
+	return "", nil
 }
 
 func nodeStart(f *Facts) (Cmd, error) {
@@ -193,12 +224,15 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	rt := Runtime{
 		From: build.From,
-		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
+		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "/app/"},
 		Env:  env,
 		Cmd:  start,
 	}
 	if image, cmd, ok := distrolessNode(f); ok {
 		rt.From, rt.Cmd = image, cmd
+	}
+	if f.Workspace != nil {
+		rt.Workdir = "/app/" + f.Workspace.App
 	}
 	return []Stage{build}, rt, nil
 }
