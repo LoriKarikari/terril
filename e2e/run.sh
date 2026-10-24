@@ -67,6 +67,10 @@ for name in "${names[@]}"; do
   rm -f "$rootfs"
   pull=$(docker save "$image" | wc -c | awk '{printf "%.1f", $1/1e6}')
   read -r eff waste < <(e2e/dive.sh "$image")
+  if awk -v e="$eff" 'BEGIN { exit !(e < 95) }'; then
+    record "$name" FAIL - "$disk" "$pull" "$eff" "$waste" - "dive efficiency below 95%; files are duplicated or deleted across layers"
+    continue
+  fi
   if grep -q HOST_MARKER <<<"$files"; then
     record "$name" FAIL - - - - - - "host node_modules or __pycache__ copied into the image"
     continue
