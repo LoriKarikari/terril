@@ -1,0 +1,56 @@
+name: Bug report
+description: wolkpack builds a wrong image, or fails on an app it should build.
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What goes wrong, in one or two sentences.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: wolkpack commit
+      description: The output of `git rev-parse --short HEAD` in your wolkpack checkout.
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - Node
+        - Python
+        - Go
+        - Static site
+        - Several, or not detected
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and result
+      description: The exact command, its output, and the error from the build or the running container.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: wolkpack plan output
+      description: The output of `wolkpack plan` for the app.
+      render: dockerfile
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should have happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest app that reproduces it
+      description: A link or a file listing with the manifests and lockfile, if you can share one.
