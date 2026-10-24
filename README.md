@@ -9,11 +9,9 @@ docker run -p 8080:8080 my-app
 
 ## How it works
 
-1. wolkpack reads the app's manifest and lockfile to find out how to install, build and start it.
-2. It writes a multi-stage Dockerfile. `wolkpack plan` prints it.
-3. It runs `docker build` with that Dockerfile.
+wolkpack reads the app's manifest and lockfile to work out how to install, build and start it. It turns that into a Dockerfile and builds it with Docker.
 
-The image runs as UID 1000 and listens on `$PORT`, which defaults to 8080. Go apps run on a distroless image. So do Node apps whose start command is a plain `node` call.
+The app builds in one image and runs in a separate, smaller one that contains only what it needs at runtime. That image runs as a non-root user and listens on `$PORT`, which defaults to 8080.
 
 ## Install
 
