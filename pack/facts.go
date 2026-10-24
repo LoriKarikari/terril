@@ -28,6 +28,7 @@ type Node struct {
 	ManagerVersion string
 	Lockfile       string
 	Version        string
+	PnP            bool
 }
 
 type PackageJSON struct {
@@ -124,12 +125,22 @@ func readNode(f *Facts) (*Node, error) {
 	if n.Manager == "" {
 		n.Manager = "npm"
 	}
+	if n.Manager == "yarn" {
+		lock, _ := f.read("yarn.lock")
+		yarnrc, _ := f.read(".yarnrc.yml")
+		if f.Has(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || !strings.HasPrefix(n.ManagerVersion+"1", "1") {
+			n.Manager = "yarn-berry"
+			n.PnP = !nodeLinkerRe.MatchString(yarnrc)
+		}
+	}
 	n.Version = strings.TrimPrefix(f.firstLine(".nvmrc", ".node-version"), "v")
 	if n.Version == "" || strings.HasPrefix(n.Version, "lts") {
 		n.Version = n.Package.Engines.Node
 	}
 	return n, nil
 }
+
+var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
 
 func readPython(f *Facts) (*Python, error) {
 	py := &Python{Manager: "pip", Deps: map[string]bool{}}
