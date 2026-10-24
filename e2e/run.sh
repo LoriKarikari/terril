@@ -6,8 +6,6 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 go build -o bin/wolkpack ./cmd/wolkpack || exit 1
-# Public images only, so a host credential helper (often broken under WSL) can't fail the run.
-export DOCKER_CONFIG=$(mktemp -d)
 results=e2e/results.tsv
 printf 'example\tstatus\tprovider\timage_mb\tuser\tdetail\n' >"$results"
 failed=0

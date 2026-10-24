@@ -12,3 +12,4 @@ ts	phase	decision	why	evidence	result
 2026-10-24T09:29:54Z	harness	e2e uses a throwaway DOCKER_CONFIG	the host config points at docker-credential-desktop.exe, which is missing under WSL; left the user config alone	e2e/logs/go-http.log first run	fixed
 2026-10-24T09:29:54Z	verify	all 7 examples pass e2e	built, ran and curled each image	e2e/results.tsv	PASS
 2026-10-24T09:29:54Z	verify	the python+node image has no node binary and no node_modules	checked inside the container, not just the size	docker run ... command -v node	PASS
+2026-10-24T09:32:32Z	harness	dropped the throwaway DOCKER_CONFIG from e2e/run.sh	the user runs native docker; removed the stale desktop.exe credsStore from ~/.docker/config.json instead	e2e/results.tsv rerun	PASS, supersedes the earlier workaround row
