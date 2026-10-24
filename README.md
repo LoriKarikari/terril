@@ -35,11 +35,11 @@ wolkpack build -t api:dev ./my-app # build the image, tagged api:dev
 
 ## Supported apps
 
-| Language | Package managers |
-|---|---|
-| Node | npm, pnpm, Yarn, Bun |
-| Python | pip, uv, Poetry |
-| Go | Go modules |
+| Language | Package managers | Frameworks |
+|---|---|---|
+| Node | npm, pnpm, Yarn, Bun | any, started with the `start` script |
+| Python | pip, uv, Poetry | Django, FastAPI, Flask |
+| Go | Go modules | any |
 
 A `web:` line in a `Procfile` replaces the start command.
 
