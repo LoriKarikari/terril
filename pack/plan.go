@@ -50,6 +50,8 @@ type Env struct{ Key, Value string }
 
 type User string
 
+type ClearEntrypoint struct{}
+
 type Cmd []string
 
 func (r Run) dockerfile() string {
@@ -81,6 +83,8 @@ func (c Copy) dockerfile() string {
 func (e Env) dockerfile() string  { return fmt.Sprintf("ENV %s=%q", e.Key, e.Value) }
 func (u User) dockerfile() string { return "USER " + string(u) }
 
+func (ClearEntrypoint) dockerfile() string { return "ENTRYPOINT []" }
+
 func (c Cmd) dockerfile() string {
 	j, _ := json.Marshal([]string(c))
 	return "CMD " + string(j)
@@ -102,7 +106,7 @@ func (r Runtime) stage() Stage {
 	for _, e := range r.Env {
 		steps = append(steps, e)
 	}
-	steps = append(steps, r.Copy, User(appUser), r.Cmd)
+	steps = append(steps, r.Copy, User(appUser), ClearEntrypoint{}, r.Cmd)
 	return Stage{Name: "runtime", From: r.From, Steps: steps}
 }
 

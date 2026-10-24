@@ -95,9 +95,14 @@ func (m nodeManager) caches() []string {
 	return []string{m.cache}
 }
 
+func nodeVersion(n *Node) (string, error) {
+	return pickVersion("node", n.Version, []string{"26", "24", "22"}, "24")
+}
+
+// Trixie matches distroless debian13, so native modules built here load at runtime.
 func nodeImage(n *Node) (string, error) {
-	v, err := pickVersion("node", n.Version, []string{"26", "24", "22"}, "24")
-	return "node:" + v + "-slim", err
+	v, err := nodeVersion(n)
+	return "node:" + v + "-trixie-slim", err
 }
 
 func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error) {
@@ -153,6 +158,26 @@ func nodeStart(f *Facts) (Cmd, error) {
 	return nil, fmt.Errorf("no start command: add a \"start\" script to package.json, or a server.js")
 }
 
+// Distroless has no shell or npm, so it only runs a start command that is a plain node call.
+func distrolessNode(f *Facts) (string, Cmd, bool) {
+	v, _ := nodeVersion(f.Node)
+	if f.ProcfileWeb != "" || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
+		return "", nil, false
+	}
+	start, err := nodeStart(f)
+	if err != nil {
+		return "", nil, false
+	}
+	if start[0] == "npm" {
+		args := strings.Fields(f.Node.Package.Scripts["start"])
+		if len(args) < 2 || args[0] != "node" || strings.ContainsAny(f.Node.Package.Scripts["start"], "&|;<>()$`'\"\\*?=") {
+			return "", nil, false
+		}
+		start = Cmd(args)
+	}
+	return "gcr.io/distroless/nodejs" + v + "-debian13", append(Cmd{"/nodejs/bin/node"}, start[1:]...), true
+}
+
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	build, err := nodeBuild(f, "build", assets, true)
 	if err != nil {
@@ -166,10 +191,14 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.Node.PnP {
 		env = append(env, Env{"NODE_OPTIONS", "--require /app/.pnp.cjs"})
 	}
-	return []Stage{build}, Runtime{
+	rt := Runtime{
 		From: build.From,
 		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
 		Env:  env,
 		Cmd:  start,
-	}, nil
+	}
+	if image, cmd, ok := distrolessNode(f); ok {
+		rt.From, rt.Cmd = image, cmd
+	}
+	return []Stage{build}, rt, nil
 }
