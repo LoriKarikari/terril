@@ -54,6 +54,8 @@ type Copy struct {
 	Src     []string
 	Dst     string
 	Exclude []string
+	// Keeps each source's path under Dst, so manifests land in their member's folder.
+	Parents bool
 	Chown   bool
 	// Keeps root as the owner in the runtime image, so the app can't modify these files.
 	RootOwned bool
@@ -93,6 +95,9 @@ func (c Copy) dockerfile() string {
 	}
 	for _, e := range c.Exclude {
 		fmt.Fprintf(&b, "--exclude=%s ", e)
+	}
+	if c.Parents {
+		b.WriteString("--parents ")
 	}
 	b.WriteString(strings.Join(c.Src, " ") + " " + c.Dst)
 	return b.String()

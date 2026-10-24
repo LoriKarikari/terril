@@ -193,8 +193,21 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 		if err != nil {
 			return Stage{}, err
 		}
-		// Every member's package.json feeds the install, so the whole repo goes in first.
-		steps = append(steps, copySource(), Run{Cmd: install, Caches: m.caches()})
+		// The install reads every member's package.json, but not their source.
+		manifests := []string{"package.json"}
+		for _, name := range []string{n.Lockfile, "pnpm-workspace.yaml", ".yarnrc.yml", ".yarn/releases", ".yarn/plugins", ".yarn/patches", "patches"} {
+			if name != "" && f.rootHas(name) {
+				manifests = append(manifests, name)
+			}
+		}
+		for _, dir := range f.Workspace.Dirs {
+			manifests = append(manifests, dir+"/package.json")
+		}
+		steps = append(steps,
+			Copy{Src: manifests, Dst: "./", Parents: true},
+			Run{Cmd: install, Caches: m.caches()},
+			copySource(),
+		)
 		if build != "" {
 			steps = append(steps, Run{Cmd: build})
 		}

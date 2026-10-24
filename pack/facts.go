@@ -35,6 +35,8 @@ type Workspace struct {
 	Root    string
 	App     string
 	Members map[string]Member
+	// Every member's folder, relative to Root and sorted.
+	Dirs []string
 }
 
 type Member struct {
@@ -258,7 +260,12 @@ func findWorkspace(dir string) (*Workspace, error) {
 		rel = filepath.ToSlash(rel)
 		if inWorkspace(patterns, rel) {
 			members, err := readMembers(parent, patterns)
-			return &Workspace{Root: parent, App: rel, Members: members}, err
+			var dirs []string
+			for _, m := range members {
+				dirs = append(dirs, m.Dir)
+			}
+			slices.Sort(dirs)
+			return &Workspace{Root: parent, App: rel, Members: members, Dirs: dirs}, err
 		}
 		if _, err := os.Stat(filepath.Join(parent, ".git")); err == nil || parent == filepath.Dir(parent) {
 			return nil, nil
@@ -343,13 +350,37 @@ func findUvWorkspace(dir string) (*Workspace, error) {
 			rel, _ := filepath.Rel(parent, app)
 			rel = filepath.ToSlash(rel)
 			if inWorkspace(ws.Members, rel) && !inWorkspace(ws.Exclude, rel) {
-				return &Workspace{Root: parent, App: rel}, nil
+				dirs, err := uvMemberDirs(parent, ws.Members, ws.Exclude)
+				return &Workspace{Root: parent, App: rel, Dirs: dirs}, err
 			}
 		}
 		if fileExists(filepath.Join(parent, ".git")) || parent == filepath.Dir(parent) {
 			return nil, nil
 		}
 	}
+}
+
+func uvMemberDirs(root string, members, exclude []string) ([]string, error) {
+	var dirs []string
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (strings.HasPrefix(d.Name(), ".") && p != root || d.Name() == "node_modules") {
+			return filepath.SkipDir
+		}
+		if d.Name() != "pyproject.toml" || p == filepath.Join(root, "pyproject.toml") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, filepath.Dir(p))
+		rel = filepath.ToSlash(rel)
+		if inWorkspace(members, rel) && !inWorkspace(exclude, rel) {
+			dirs = append(dirs, rel)
+		}
+		return nil
+	})
+	slices.Sort(dirs)
+	return dirs, err
 }
 
 func workspacePatterns(dir string) ([]string, error) {

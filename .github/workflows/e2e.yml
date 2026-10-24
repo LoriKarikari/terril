@@ -50,3 +50,14 @@ jobs:
           path: |
             e2e/results.tsv
             e2e/logs/
+
+  cache:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: e2e/cache.sh
