@@ -49,7 +49,7 @@ wolkpack build -t api:dev ./my-app
 |---|---|---|
 | Node | npm, pnpm, Yarn, Bun | any, started with the `start` script |
 | Python | pip, uv, Poetry | Django, FastAPI, Flask |
-| Go | Go modules | any |
+| Go | Go modules | any, including apps that use cgo |
 | Static sites | none, or any Node build | plain HTML, Vite apps without a server |
 
 A `web:` line in a `Procfile` replaces the start command.
