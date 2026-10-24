@@ -30,3 +30,7 @@ A `Procfile` `web:` line overrides the start command for any language. The app l
 ## Tests
 
 `e2e/run.sh` builds every app in `examples/`, runs it and checks its HTTP response. It writes `e2e/results.tsv` with each image's size and user. An example with an `expect-error` file must fail to build with that message.
+
+## License
+
+Apache-2.0. See `LICENSE`.
