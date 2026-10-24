@@ -144,9 +144,14 @@ func (r Runtime) stage() Stage {
 	return Stage{Name: "runtime", From: r.From, Workdir: r.Workdir, Steps: steps}
 }
 
+// The package lists live in a cache mount, so they never reach a layer. dpkg and debconf
+// keep -old copies and logs of every change, which the same step deletes.
 func aptInstall(packages []string) Run {
-	return Run{Cmd: "apt-get update && apt-get install -y --no-install-recommends " +
-		strings.Join(packages, " ") + " && rm -rf /var/lib/apt/lists/*"}
+	return Run{
+		Cmd: "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(packages, " ") +
+			" && rm -rf /var/log/apt /var/log/dpkg.log /var/cache/debconf/*-old /var/lib/dpkg/*-old",
+		Caches: []string{"/var/lib/apt/lists,sharing=locked"},
+	}
 }
 
 func (p *Plan) Dockerfile() string {
