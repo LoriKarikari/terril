@@ -55,6 +55,8 @@ type Copy struct {
 	Dst     string
 	Exclude []string
 	Chown   bool
+	// Keeps root as the owner in the runtime image, so the app can't modify these files.
+	RootOwned bool
 }
 
 type Env struct{ Key, Value string }
@@ -135,7 +137,7 @@ func (r Runtime) stage() Stage {
 		steps = append(steps, f)
 	}
 	for _, c := range r.Copies {
-		c.Chown = true
+		c.Chown = !c.RootOwned
 		steps = append(steps, c)
 	}
 	steps = append(steps, User(appUser), ClearEntrypoint{}, r.Cmd)

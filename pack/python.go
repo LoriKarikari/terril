@@ -20,6 +20,31 @@ var pythonProvider = provider{
 
 const venv = "/app/.venv"
 
+const pythonDir = "/python"
+
+// Parts of uv's Python a server never uses. The bin/python3.x executable embeds the
+// interpreter, so libpython is only for programs that embed Python themselves.
+var pythonRuntimeExcludes = []string{
+	"*/lib/libpython3*",
+	"*/lib/python3*/site-packages/pip*",
+	"*/lib/python3*/ensurepip",
+	"*/lib/python3*/idlelib",
+	"*/lib/python3*/tkinter",
+	"*/lib/python3*/turtledemo",
+	"*/lib/python3*/lib-dynload/_tkinter*",
+	"*/lib/python3*/config-3*",
+	"*/lib/tcl*",
+	"*/lib/tk*",
+	"*/lib/libtcl*",
+	"*/lib/libtk*",
+	"*/lib/itcl*",
+	"*/lib/thread*",
+	"*/include",
+	"*/share",
+	"*/bin/idle*",
+	"*/bin/pip*",
+}
+
 var venvPath = Env{"PATH", venv + "/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
 
 func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -28,18 +53,32 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if err != nil {
 		return nil, Runtime{}, err
 	}
-	image := "python:" + v + "-slim"
-
 	uvCache := []string{"/root/.cache/uv"}
 	steps := []Step{
 		venvPath,
 		Copy{From: "ghcr.io/astral-sh/uv:0.13.5", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
+		Env{"UV_PYTHON", v},
 		Env{"UV_PROJECT_ENVIRONMENT", venv},
 		Env{"VIRTUAL_ENV", venv},
-		// The venv links to this image's python, which the runtime image also has.
-		Env{"UV_PYTHON_DOWNLOADS", "never"},
 		Env{"UV_LINK_MODE", "copy"},
 		Env{"UV_COMPILE_BYTECODE", "1"},
+	}
+	// uv's standalone Python needs only glibc, so the runtime can be distroless. The venv
+	// links to /python by absolute path, so both stages keep it there. A shell or apt packages
+	// need Debian, where python:slim's Python is smaller because it shares Debian's libraries.
+	debian := f.needsDebianRuntime()
+	buildImage, runtimeImage := "debian:trixie-slim", "gcr.io/distroless/cc-debian13"
+	if debian {
+		buildImage = "python:" + v + "-slim"
+		runtimeImage = buildImage
+		steps = append(steps, Env{"UV_PYTHON_PREFERENCE", "only-system"})
+	} else {
+		steps = append(steps,
+			Env{"UV_PYTHON_INSTALL_DIR", pythonDir},
+			Env{"UV_PYTHON_CACHE_DIR", "/root/.cache/uv/python"},
+			Env{"UV_PYTHON_PREFERENCE", "only-managed"},
+			Run{Cmd: "uv python install " + v, Caches: uvCache},
+		)
 	}
 	switch py.Manager {
 	case "uv":
@@ -94,24 +133,33 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		return nil, Runtime{}, err
 	}
 	rt := Runtime{
-		From:   image,
+		From:   runtimeImage,
 		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
 		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
 		Cmd:    start,
 	}
+	if !debian {
+		rt.Copies = append([]Copy{{From: "build", Src: []string{pythonDir + "/"}, Dst: pythonDir + "/", RootOwned: true, Exclude: pythonRuntimeExcludes}}, rt.Copies...)
+		rt.Env = append(rt.Env, Env{"SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt"})
+	}
 	if ws := f.UvWorkspace; ws != nil {
 		rt.Workdir = "/app/" + ws.App
 	}
-	return []Stage{{Name: "build", From: image, Steps: steps}}, rt, nil
+	return []Stage{{Name: "build", From: buildImage, Steps: steps}}, rt, nil
 }
 
+// uvicorn can't read PORT and distroless has no shell, so Python adds --port at startup.
+const withPort = "import os, sys; os.execvp(sys.argv[1], sys.argv[1:] + ['--port', os.environ['PORT']])"
+
+// gunicorn binds to 0.0.0.0:$PORT on its own when PORT is set.
 var pythonFrameworks = []struct {
-	name, dep, server, cmd string
-	module                 func(f *Facts) string
+	name, dep, server string
+	cmd               func(module string) Cmd
+	module            func(f *Facts) string
 }{
-	{"Django", "django", "gunicorn", "gunicorn %s --bind 0.0.0.0:$PORT", djangoWSGI},
-	{"FastAPI", "fastapi", "uvicorn", "uvicorn %s --host 0.0.0.0 --port $PORT", appVariable("FastAPI")},
-	{"Flask", "flask", "gunicorn", "gunicorn %s --bind 0.0.0.0:$PORT", appVariable("Flask")},
+	{"Django", "django", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, djangoWSGI},
+	{"FastAPI", "fastapi", "uvicorn", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }, appVariable("FastAPI")},
+	{"Flask", "flask", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, appVariable("Flask")},
 }
 
 var pythonEntries = []string{"main.py", "app.py", "wsgi.py"}
@@ -128,7 +176,7 @@ func pythonStart(f *Facts) (Cmd, error) {
 		if !f.Python.Deps[fw.server] {
 			return nil, fmt.Errorf("this is a %s app but %s isn't in its dependencies; add %s", fw.name, fw.server, fw.server)
 		}
-		return Cmd{"sh", "-c", "exec " + fmt.Sprintf(fw.cmd, module)}, nil
+		return fw.cmd(module), nil
 	}
 	for _, file := range pythonEntries {
 		if f.Has(file) {
