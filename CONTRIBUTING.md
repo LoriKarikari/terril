@@ -63,7 +63,7 @@ just test
 just test python-flask node-pnpm
 ```
 
-The script prints a table and writes it to `e2e/results.tsv`, with each image's size and user. Build logs go to `e2e/logs/`. A test fails if the image runs as root.
+The script prints a table and writes it to `e2e/results.tsv`, with each image's size on disk, its compressed pull size, its [dive](https://github.com/wagoodman/dive) efficiency and wasted bytes, and its user. You need dive and jq installed. Build logs go to `e2e/logs/`. A test fails if the image runs as root.
 
 ### Add a test app
 
@@ -80,6 +80,8 @@ A test app can also have these files:
 Before each build, the script adds a `node_modules` and a `__pycache__` folder to the app. The test fails if either ends up in the image.
 
 Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
+
+`e2e/cache.sh` builds each app, adds a source file, and rebuilds. It fails if the rebuild reinstalls dependencies, and writes the rebuild time to `e2e/cache.tsv`.
 
 ## Using AI tools
 

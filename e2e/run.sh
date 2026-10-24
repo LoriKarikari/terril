@@ -4,13 +4,13 @@ cd "$(dirname "$0")/.."
 
 go build -o bin/wolkpack ./cmd/wolkpack || exit 1
 results=e2e/results.tsv
-printf 'example\tstatus\tprovider\timage_mb\tuser\tdetail\n' >"$results"
+printf 'example\tstatus\tprovider\tdisk_mb\tpull_mb\tdive_eff\tdive_waste_mb\tuser\tdetail\n' >"$results"
 failed=0
 
 record() {
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >>"$results"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >>"$results"
   [ "$2" = PASS ] || failed=1
-  echo "$2 $1 $6"
+  echo "$2 $1 $9"
 }
 
 names=("$@")
@@ -26,11 +26,11 @@ for name in "${names[@]}"; do
   if [ -f "$dir/expect-error" ]; then
     want=$(cat "e2e/testdata/$name/expect-error")
     if bin/wolkpack build -t "$image" "$dir" >"$log" 2>&1; then
-      record "$name" FAIL - - - "build succeeded but should have failed"
+      record "$name" FAIL - - - - - - "build succeeded but should have failed"
     elif grep -qF "$want" "$log"; then
-      record "$name" PASS - - - "failed as expected"
+      record "$name" PASS - - - - - - "failed as expected"
     else
-      record "$name" FAIL - - - "wrong error, see $log"
+      record "$name" FAIL - - - - - - "wrong error, see $log"
     fi
     continue
   fi
@@ -55,14 +55,20 @@ for name in "${names[@]}"; do
   [ $status -eq 0 ] && { bin/wolkpack build "${env_args[@]}" -t "$image" "$dir" >>"$log" 2>&1 || status=$?; }
   rm -rf "$dir/host-artifacts"
   if [ $status -ne 0 ]; then
-    record "$name" FAIL - - - "build failed, see $log"
+    record "$name" FAIL - - - - - - "build failed, see $log"
     continue
   fi
   cid=$(docker create "$image")
-  files=$(docker export "$cid" | tar -t)
+  rootfs=$(mktemp)
+  docker export "$cid" >"$rootfs"
   docker rm "$cid" >/dev/null
+  files=$(tar -tf "$rootfs")
+  disk=$(stat -c %s "$rootfs" | awk '{printf "%.1f", $1/1e6}')
+  rm -f "$rootfs"
+  pull=$(docker save "$image" | wc -c | awk '{printf "%.1f", $1/1e6}')
+  read -r eff waste < <(e2e/dive.sh "$image")
   if grep -q HOST_MARKER <<<"$files"; then
-    record "$name" FAIL - - - "host node_modules or __pycache__ copied into the image"
+    record "$name" FAIL - - - - - - "host node_modules or __pycache__ copied into the image"
     continue
   fi
   shipped=""
@@ -72,7 +78,7 @@ for name in "${names[@]}"; do
     done <"e2e/testdata/$name/absent"
   fi
   if [ -n "$shipped" ]; then
-    record "$name" FAIL - - - "image ships packages it shouldn't:$shipped"
+    record "$name" FAIL - - - - - - "image ships packages it shouldn't:$shipped"
     continue
   fi
   meta=$(docker history --no-trunc "$image"; docker image inspect "$image")
@@ -85,14 +91,13 @@ for name in "${names[@]}"; do
     for v in "${secrets[@]}"; do grep -qF -- "$v" <<<"$content" && leaked="$leaked '$v'"; done
   fi
   if [ -n "$leaked" ]; then
-    record "$name" FAIL - - - "build env value in the image:$leaked"
+    record "$name" FAIL - - - - - - "build env value in the image:$leaked"
     continue
   fi
   provider=$(bin/wolkpack plan "$dir" | sed -n 's/^# wolkpack: //p')
-  size=$(docker image inspect -f '{{.Size}}' "$image" | awk '{printf "%d", $1/1000000}')
   user=$(docker image inspect -f '{{.Config.User}}' "$image")
   if [ -z "$user" ] || [ "${user%%:*}" = 0 ] || [ "${user%%:*}" = root ]; then
-    record "$name" FAIL "$provider" "$size" "${user:-root}" "image runs as root"
+    record "$name" FAIL "$provider" "$disk" "$pull" "$eff" "$waste" "${user:-root}" "image runs as root"
     continue
   fi
 
@@ -108,11 +113,12 @@ for name in "${names[@]}"; do
   docker logs "$cid" >>"$log" 2>&1
   docker rm -f "$cid" >/dev/null
   if [[ "$body" == *"$want"* ]]; then
-    record "$name" PASS "$provider" "$size" "$user" "got: $(echo "$body" | tr -s "\n\t" "  " | head -c 60)"
+    record "$name" PASS "$provider" "$disk" "$pull" "$eff" "$waste" "$user" "got: $(echo "$body" | tr -s "\n\t" "  " | head -c 60)"
   else
-    record "$name" FAIL "$provider" "$size" "$user" "wanted '$want', got '$(echo "$body" | tr -s "\n\t" "  " | head -c 60)'"
+    record "$name" FAIL "$provider" "$disk" "$pull" "$eff" "$waste" "$user" "wanted '$want', got '$(echo "$body" | tr -s "\n\t" "  " | head -c 60)'"
   fi
 done
 
 column -s$'\t' -t "$results"
+awk -F'\t' 'NR>1 && $5!="-" {p+=$5; d+=$4; n++} END {printf "total: %d images, pull %.1f MB, disk %.1f MB\n", n, p, d}' "$results"
 exit $failed
