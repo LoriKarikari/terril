@@ -26,7 +26,7 @@ type Runtime struct {
 	Workdir  string
 	From     string
 	Packages []string
-	Copy     Copy
+	Copies   []Copy
 	Env      []Env
 	Files    []File
 	Cmd      Cmd
@@ -123,7 +123,6 @@ func copyAssets(stages []string) []Step {
 }
 
 func (r Runtime) stage() Stage {
-	r.Copy.Chown = true
 	var steps []Step
 	if len(r.Packages) > 0 {
 		steps = append(steps, aptInstall(r.Packages))
@@ -135,7 +134,11 @@ func (r Runtime) stage() Stage {
 	for _, f := range r.Files {
 		steps = append(steps, f)
 	}
-	steps = append(steps, r.Copy, User(appUser), ClearEntrypoint{}, r.Cmd)
+	for _, c := range r.Copies {
+		c.Chown = true
+		steps = append(steps, c)
+	}
+	steps = append(steps, User(appUser), ClearEntrypoint{}, r.Cmd)
 	return Stage{Name: "runtime", From: r.From, Workdir: r.Workdir, Steps: steps}
 }
 

@@ -47,7 +47,7 @@ wolkpack build -t api:dev ./my-app
 
 | Language | Package managers | Frameworks |
 |---|---|---|
-| Node | npm, pnpm, Yarn, Bun | any, started with the `start` script |
+| Node | npm, pnpm, Yarn, Bun | Next.js, Nuxt, Astro, React Router, or any app with a `start` script |
 | Python | pip, uv, Poetry | Django, FastAPI, Flask |
 | Go | Go modules | any |
 | Static sites | none, or any Node build | plain HTML, Vite apps without a server |
