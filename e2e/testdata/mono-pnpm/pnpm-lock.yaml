@@ -166,22 +166,46 @@ importers:
 
   .: {}
 
+  apps/admin:
+    dependencies:
+      left-pad:
+        specifier: 1.3.0
+        version: 1.3.0
+
   apps/web:
     dependencies:
       '@mono/greeting':
         specifier: workspace:*
         version: link:../../packages/greeting
+    devDependencies:
+      prettier:
+        specifier: 3.6.2
+        version: 3.6.2
+
+  packages/greeting:
+    dependencies:
       ms:
         specifier: 2.1.3
         version: 2.1.3
 
-  packages/greeting: {}
-
 packages:
+
+  left-pad@1.3.0:
+    resolution: {integrity: sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==}
+    deprecated: use String.prototype.padStart()
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
+  prettier@3.6.2:
+    resolution: {integrity: sha512-I7AIg5boAr5R0FFtJ6rCfD+LFsWHp81dolrFD8S79U9tb8Az2nGrJncnMSnys+bpQJfRUzqs9hnA81OAA3hCuQ==}
+    engines: {node: '>=14'}
+    hasBin: true
+
 snapshots:
 
+  left-pad@1.3.0: {}
+
   ms@2.1.3: {}
+
+  prettier@3.6.2: {}

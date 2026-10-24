@@ -41,6 +41,8 @@ wolkpack build apps/web
 
 wolkpack walks up to the `pnpm-workspace.yaml` or `package.json` `workspaces` that lists the app, and stops at the repo root. It builds from the workspace root, so the lockfile and sibling packages are available. With `turbo.json` it runs `turbo run build --filter=<app>`. With pnpm it runs `pnpm --filter <app>... run build`, which builds sibling packages first. Otherwise it runs the app's own `build` script. The image starts in the app's folder.
 
+With npm and pnpm, the image keeps only the production dependencies of the app and the workspace packages it uses. Dev dependencies and other apps' dependencies are removed after the build. Yarn and Bun workspace images still keep every member's dependencies.
+
 A Python or Go app in a subfolder needs nothing special. Point wolkpack at the folder.
 
 ## Config
@@ -58,7 +60,7 @@ Unknown keys fail the build, so a typo can't be silently ignored. Setting `start
 
 ## Tests
 
-`e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message. An `app` file names a subfolder to build, for monorepos. Before each build the harness plants a `node_modules` and a `__pycache__` in the app, and fails if either reaches the image.
+`e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message. An `app` file names a subfolder to build, for monorepos. An `absent` file lists package names that must not be in the image's `node_modules`. Before each build the harness plants a `node_modules` and a `__pycache__` in the app, and fails if either reaches the image.
 
 ## License
 
