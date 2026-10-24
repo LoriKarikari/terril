@@ -1,0 +1,1 @@
+{ "name": "shell-chain", "scripts": { "start": "node prepare.js && node server.js" } }

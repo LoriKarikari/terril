@@ -266,23 +266,25 @@ func nodeStart(f *Facts) (Cmd, error) {
 }
 
 // Distroless has no shell or npm, so it only runs a start command that is a plain node call.
-func distrolessNode(f *Facts) (string, Cmd, bool) {
+func distrolessNode(f *Facts) (string, []Env, Cmd, bool) {
 	v, _ := nodeVersion(f.Node)
 	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
-		return "", nil, false
+		return "", nil, nil, false
 	}
 	start, err := nodeStart(f)
 	if err != nil {
-		return "", nil, false
+		return "", nil, nil, false
 	}
-	if start[0] == "npm" {
-		args := strings.Fields(f.Node.Package.Scripts["start"])
-		if len(args) < 2 || args[0] != "node" || strings.ContainsAny(f.Node.Package.Scripts["start"], "&|;<>()$`'\"\\*?=") {
-			return "", nil, false
+	var env []Env
+	if script := f.Node.Package.Scripts["start"]; script != "" {
+		var args []string
+		var ok bool
+		if env, args, ok = directCommand(script); !ok || args[0] != "node" || len(args) < 2 {
+			return "", nil, nil, false
 		}
 		start = Cmd(args)
 	}
-	return "gcr.io/distroless/nodejs" + v + "-debian13", append(Cmd{"/nodejs/bin/node"}, start[1:]...), true
+	return "gcr.io/distroless/nodejs" + v + "-debian13", env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), true
 }
 
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -332,8 +334,8 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Env:    env,
 		Cmd:    start,
 	}
-	if image, cmd, ok := distrolessNode(f); ok {
-		rt.From, rt.Cmd = image, cmd
+	if image, startEnv, cmd, ok := distrolessNode(f); ok {
+		rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
 	}
 	if f.Node.Manager == "bun" {
 		if image, startEnv, cmd, ok := distrolessBun(f); ok {
