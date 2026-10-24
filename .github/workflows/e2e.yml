@@ -36,6 +36,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Install dive
+        run: |
+          curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
+          sudo apt-get install -y /tmp/dive.deb
       - run: go vet ./...
       - run: test -z "$(gofmt -l .)"
       - run: e2e/run.sh
