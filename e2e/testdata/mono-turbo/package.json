@@ -1,0 +1,1 @@
+{ "name": "mono-turbo", "private": true, "packageManager": "npm@11.6.0", "workspaces": ["apps/*", "packages/*"], "devDependencies": { "turbo": "2.6.1" } }
