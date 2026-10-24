@@ -26,15 +26,6 @@ The image listens on `$PORT`, which defaults to 8080:
 docker run -p 8080:8080 my-app
 ```
 
-## How it differs
-
-- **The plan is a Dockerfile.** `wolkpack plan` prints the Dockerfile that `build` uses. You can commit it and run `docker build` yourself without wolkpack.
-- **One app can use several languages.** If a Python or Go app has a `package.json` with a `build` script, Node builds it in its own stage. wolkpack copies the output into the app before the app's own build runs. Node isn't in the final image.
-- **Two runtimes in one repo is an error.** If a repo has both `go.mod` and `requirements.txt`, wolkpack names both and stops. Pick one with `--provider` or in `wolkpack.toml`.
-- **wolkpack reads manifests with real parsers.** It parses `package.json`, `pyproject.toml`, `requirements.txt` and `go.mod`. It normalizes Python package names per PEP 503, so `fastapi-users` doesn't count as FastAPI.
-- **Version ranges work.** For `"engines": {"node": ">=22"}` or `requires-python = ">=3.12"`, wolkpack uses its default version if the range allows it, and otherwise the newest supported version that fits. If none fits, the build fails and lists the supported versions.
-- **Images run as UID 1000.** Go apps ship as a static binary on distroless, about 14 MB. Node apps whose start command is a plain `node` call run on distroless Node, about 214 MB. A start script that needs a shell keeps the slim Node image, about 334 MB.
-
 ## Supported apps
 
 | Language | Package managers | Start command, first match wins |
@@ -46,6 +37,8 @@ docker run -p 8080:8080 my-app
 A Django, FastAPI or Flask app must list its server in its dependencies. Without it, the build fails and names the missing package.
 
 For Django apps that set `STATIC_ROOT`, wolkpack runs `collectstatic` during the build, after any Node build. It doesn't run migrations, because several replicas starting at once would run them in parallel.
+
+If a Python or Go app also has a `package.json` with a `build` script, Node builds it in a separate stage, and wolkpack copies the output into the app before the app's own build. Node isn't in the final image.
 
 Bun apps build and run on the `oven/bun` image.
 
@@ -97,6 +90,10 @@ A test app can also contain these files:
 Before each build, the script adds a `node_modules` and a `__pycache__` folder to the app. The test fails if either one ends up in the image.
 
 CI runs `go vet`, `gofmt` and `e2e/run.sh` on every push to `main` and on every pull request.
+
+## Acknowledgements
+
+wolkpack is inspired by [Nixpacks](https://github.com/railwayapp/nixpacks), [Railpack](https://github.com/railwayapp/railpack) and [Cloud Native Buildpacks](https://buildpacks.io).
 
 ## License
 
