@@ -3,7 +3,10 @@ package pack
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
+
+	"golang.org/x/mod/modfile"
 )
 
 var goProvider = provider{
@@ -39,14 +42,31 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Run{Cmd: "go mod download", Caches: caches[:1]},
 		copySource(),
 	}
+	// A replace with a local path needs that folder before modules can download.
+	if slices.ContainsFunc(f.Go.Replace, func(r *modfile.Replace) bool { return modfile.IsDirectoryPath(r.New.Path) }) {
+		steps = []Step{copySource(), Run{Cmd: "go mod download", Caches: caches[:1]}}
+	}
 	steps = append(steps, copyAssets(assets)...)
-	steps = append(steps, Run{Cmd: "CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app " + pkg, Caches: caches})
 
+	image := "golang:" + version
 	base := "gcr.io/distroless/static-debian12"
+	cgo := "0"
+	if f.GoCgo {
+		// Trixie on both sides, so the binary links against the same glibc it runs with.
+		image, base, cgo = image+"-trixie", "gcr.io/distroless/cc-debian13", "1"
+	} else {
+		steps = append(steps, Run{
+			Cmd: "cgo=$(CGO_ENABLED=1 go list -deps -f '{{if and .CgoFiles (not .Standard)}}{{.ImportPath}} {{end}}' " + pkg + ") && " +
+				`{ [ -z "$cgo" ] || { echo "wolkpack: this app needs cgo for $cgo, which wolkpack didn't detect. Please open an issue." >&2; exit 1; }; }`,
+			Caches: caches,
+		})
+	}
+	steps = append(steps, Run{Cmd: "CGO_ENABLED=" + cgo + " go build -trimpath -ldflags='-s -w' -o /out/app " + pkg, Caches: caches})
+
 	if f.needsDebianRuntime() {
 		base = "debian:trixie-slim"
 	}
-	return []Stage{{Name: "build", From: "golang:" + version, Steps: steps}}, Runtime{
+	return []Stage{{Name: "build", From: image, Steps: steps}}, Runtime{
 		From:   base,
 		Copies: []Copy{{From: "build", Src: []string{"/out/app"}, Dst: "/app/app"}},
 		Cmd:    Cmd{"/app/app"},
