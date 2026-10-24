@@ -6,9 +6,9 @@ go build -o bin/wolkpack ./cmd/wolkpack || exit 1
 out=e2e/cache.tsv
 printf 'example\tstatus\trebuild_s\tsteps_rerun\tdeps_rerun\n' >"$out"
 failed=0
-install_re='install|uv sync|npm ci|go mod download|pip install|poetry install'
-# Production prunes run after the build, so a source edit reruns them by design.
-prune_re='prune|--prod|--production|--omit=dev'
+install_re='install|uv sync|npm ci|go mod download'
+# Tool setup, and production prunes that run after the build, aren't the dependency install.
+not_install_re='apt-get|install -g|python install|tool install|prune|--prod|--production|--omit=dev'
 
 names=("$@")
 [ ${#names[@]} -eq 0 ] && names=($(ls e2e/testdata))
@@ -29,6 +29,8 @@ for name in "${names[@]}"; do
     rm -rf "$work"
     continue
   fi
+  plan_dir=$src
+  [ -f "$src/app" ] && plan_dir=$src/$(cat "$src/app")
   echo "$RANDOM" >"$dir/wolkpack-cache-probe.txt"
   start=$(date +%s.%N)
   bin/wolkpack build -t "wolkpack-cache-$name" "$dir" >"$log" 2>&1
@@ -41,7 +43,11 @@ for name in "${names[@]}"; do
     /^#[0-9]+ CACHED/ { cached[$1] = 1 }
     END { for (id in cmd) if (!(id in cached)) print cmd[id] }' "$log" | sort -u)
   steps=$(grep -c . <<<"$rerun")
-  deps=$(grep -E "$install_re" <<<"$rerun" | grep -vE "$prune_re" | head -1 | cut -c1-60)
+  # The first dependency install in the plan must come from cache. Later installs, such as a
+  # workspace's own packages after the source copy, may rerun.
+  first=$(bin/wolkpack plan "$plan_dir" | sed -n 's/^RUN \(--mount=[^ ]* \)*//p' | grep -E "$install_re" | grep -vE "$not_install_re" | head -1)
+  deps=""
+  [ -n "$first" ] && grep -qxF -- "$first" <<<"$rerun" && deps=$(cut -c1-60 <<<"$first")
   status=PASS
   [ -n "$deps" ] && status=FAIL && failed=1
   printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$secs" "$steps" "${deps:--}" >>"$out"
