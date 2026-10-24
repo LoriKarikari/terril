@@ -39,9 +39,9 @@ Point wolkpack at one app inside a JS workspace:
 wolkpack build apps/web
 ```
 
-wolkpack walks up to the `pnpm-workspace.yaml` or `package.json` `workspaces` that lists the app, and stops at the repo root. It builds from the workspace root, so the lockfile and sibling packages are available. With `turbo.json` it runs `turbo run build --filter=<app>`. With pnpm it runs `pnpm --filter <app>... run build`, which builds sibling packages first. Otherwise it runs the app's own `build` script. The image starts in the app's folder.
+wolkpack walks up to the `pnpm-workspace.yaml` or `package.json` `workspaces` that lists the app, and stops at the repo root. It builds from the workspace root, so the lockfile and sibling packages are available. With `turbo.json` it runs `turbo run build --filter=<app>`. With pnpm it runs `pnpm --filter <app>... run build`, which builds sibling packages first. Otherwise it runs the `build` script of each workspace package the app depends on, dependencies first, and then the app's own. The image starts in the app's folder.
 
-With npm and pnpm, the image keeps only the production dependencies of the app and the workspace packages it uses. Dev dependencies and other apps' dependencies are removed after the build. Yarn and Bun workspace images still keep every member's dependencies.
+The image keeps only the production dependencies of the app and the workspace packages it uses. Dev dependencies and other apps' dependencies are removed after the build. Yarn 1 can't install one member alone, so its images also keep other members' production dependencies.
 
 A Python or Go app in a subfolder needs nothing special. Point wolkpack at the folder.
 
