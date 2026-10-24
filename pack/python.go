@@ -69,7 +69,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 
 	start, err := pythonStart(f)
-	if err != nil && f.ProcfileWeb == "" {
+	if err != nil && f.Start == "" {
 		return nil, Runtime{}, err
 	}
 	return []Stage{{Name: "build", From: image, Steps: steps}}, Runtime{
