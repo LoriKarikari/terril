@@ -30,43 +30,47 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	image := "python:" + v + "-slim"
 
-	steps := []Step{venvPath}
+	uvCache := []string{"/root/.cache/uv"}
+	steps := []Step{
+		venvPath,
+		Copy{From: "ghcr.io/astral-sh/uv:0.13.5", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
+		Env{"UV_PROJECT_ENVIRONMENT", venv},
+		Env{"VIRTUAL_ENV", venv},
+		// The venv links to this image's python, which the runtime image also has.
+		Env{"UV_PYTHON_DOWNLOADS", "never"},
+		Env{"UV_LINK_MODE", "copy"},
+		Env{"UV_COMPILE_BYTECODE", "1"},
+	}
 	switch py.Manager {
 	case "uv":
-		steps = append(steps,
-			Copy{From: "ghcr.io/astral-sh/uv:0.13.5", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
-			Env{"UV_PROJECT_ENVIRONMENT", venv},
-			// The venv links to this image's python, which the runtime image also has.
-			Env{"UV_PYTHON_DOWNLOADS", "never"},
-			Env{"UV_LINK_MODE", "copy"},
-			Env{"UV_COMPILE_BYTECODE", "1"},
-		)
 		if ws := f.UvWorkspace; ws != nil {
 			// Every member's pyproject.toml feeds the sync, so the whole workspace goes in first.
 			steps = append(steps,
 				copySource(),
-				Run{Cmd: "uv sync --frozen --no-dev --package " + shellQuote([]string{py.Name}), Caches: []string{"/root/.cache/uv"}},
+				Run{Cmd: "uv sync --frozen --no-dev --package " + shellQuote([]string{py.Name}), Caches: uvCache},
 			)
 		} else {
 			steps = append(steps,
 				Copy{Src: []string{"pyproject.toml", "uv.lock"}, Dst: "./"},
-				Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: []string{"/root/.cache/uv"}},
+				Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: uvCache},
 				copySource(),
 			)
 		}
 	case "pip":
-		steps = append(steps, Run{Cmd: "python -m venv " + venv})
-		pipCache := []string{"/root/.cache/pip"}
+		// uv venv leaves pip out of the image; uv pip installs the same requirements.
+		steps = append(steps, Run{Cmd: "uv venv " + venv})
 		if f.Has("requirements.txt") {
 			steps = append(steps,
 				Copy{Src: []string{"requirements.txt"}, Dst: "./"},
-				Run{Cmd: "pip install -r requirements.txt", Caches: pipCache})
+				Run{Cmd: "uv pip install -r requirements.txt", Caches: uvCache})
 		} else if len(py.Requirements) > 0 {
-			steps = append(steps, Run{Cmd: "pip install " + shellQuote(py.Requirements), Caches: pipCache})
+			steps = append(steps, Run{Cmd: "uv pip install " + shellQuote(py.Requirements), Caches: uvCache})
 		}
 	case "poetry":
 		steps = append(steps,
-			Run{Cmd: "pip install poetry==2.5.1", Caches: []string{"/root/.cache/pip"}},
+			Run{Cmd: "uv venv " + venv},
+			Env{"UV_TOOL_BIN_DIR", "/usr/local/bin"},
+			Run{Cmd: "uv tool install poetry==2.5.1", Caches: uvCache},
 			Env{"POETRY_VIRTUALENVS_IN_PROJECT", "true"},
 			Env{"POETRY_NO_INTERACTION", "1"},
 			Copy{Src: []string{"pyproject.toml", "poetry.lock"}, Dst: "./"},
