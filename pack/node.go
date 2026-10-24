@@ -139,6 +139,11 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 	if m.setup != nil {
 		steps = append(steps, m.setup(n)...)
 	}
+	if fw := nodeFrameworkFor(f); fw != nil {
+		for _, e := range fw.buildEnv {
+			steps = append(steps, e)
+		}
+	}
 	install := m.install
 	if n.Lockfile != "" {
 		install = m.frozen
@@ -259,6 +264,23 @@ func distrolessNode(f *Facts) (string, Cmd, bool) {
 }
 
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
+	if fw := nodeFrameworkFor(f); fw != nil {
+		build, err := nodeBuild(f, "build", assets, false)
+		if err != nil {
+			return nil, Runtime{}, err
+		}
+		rt := Runtime{
+			From:   build.From,
+			Copies: fw.copies(f),
+			Env:    append([]Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}, fw.env...),
+			Cmd:    append(Cmd{"node"}, fw.cmd...),
+		}
+		if v, _ := nodeVersion(f.Node); !f.needsDebianRuntime() && !strings.Contains(v, ".") {
+			rt.From = "gcr.io/distroless/nodejs" + v + "-debian13"
+			rt.Cmd[0] = "/nodejs/bin/node"
+		}
+		return []Stage{build}, rt, nil
+	}
 	build, err := nodeBuild(f, "build", assets, true)
 	if err != nil {
 		return nil, Runtime{}, err
@@ -277,15 +299,16 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		rt, err := staticRuntime(f, site, true)
 		return []Stage{build}, rt, err
 	}
-	env := []Env{{"NODE_ENV", "production"}}
+	// Astro, Nitro and others listen on HOST, often localhost by default.
+	env := []Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}
 	if f.Node.PnP {
 		env = append(env, Env{"NODE_OPTIONS", "--require /app/.pnp.cjs"})
 	}
 	rt := Runtime{
-		From: build.From,
-		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "/app/"},
-		Env:  env,
-		Cmd:  start,
+		From:   build.From,
+		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
+		Env:    env,
+		Cmd:    start,
 	}
 	if image, cmd, ok := distrolessNode(f); ok {
 		rt.From, rt.Cmd = image, cmd
