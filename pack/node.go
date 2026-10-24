@@ -30,6 +30,8 @@ type nodeManager struct {
 	prune, cache        string
 	run, start, runFile string
 	exec                string
+	// Reinstalls only one workspace member's production dependency tree.
+	workspacePrune func(install, pkg string) string
 }
 
 var corepackYarn = func(*Node) []Step {
@@ -45,6 +47,9 @@ var nodeManagers = map[string]nodeManager{
 		image: nodeImage, install: "npm install", frozen: "npm ci",
 		prune: "npm prune --omit=dev", cache: "/root/.npm",
 		run: "npm run", start: "npm start", runFile: "node", exec: "npx",
+		workspacePrune: func(install, pkg string) string {
+			return install + " --omit=dev --include-workspace-root --workspace=" + shellQuote([]string{pkg})
+		},
 	},
 	"pnpm": {
 		image: nodeImage,
@@ -58,6 +63,9 @@ var nodeManagers = map[string]nodeManager{
 		install: "pnpm install", frozen: "pnpm install --frozen-lockfile",
 		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
 		run: "pnpm run", start: "npm start", runFile: "node", exec: "pnpm exec",
+		workspacePrune: func(install, pkg string) string {
+			return install + " --prod --filter " + shellQuote([]string{pkg + "..."})
+		},
 	},
 	"yarn": {
 		image: nodeImage, setup: corepackYarn,
@@ -134,6 +142,12 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 		steps = append(steps, copySource(), Run{Cmd: install, Caches: m.caches()})
 		if build != "" {
 			steps = append(steps, Run{Cmd: build})
+		}
+		if prune && m.workspacePrune != nil {
+			steps = append(steps, Run{
+				Cmd:    "find . -name node_modules -type d -prune -exec rm -rf {} + && " + m.workspacePrune(install, n.Package.Name),
+				Caches: m.caches(),
+			})
 		}
 		return Stage{Name: name, From: image, Steps: steps}, nil
 	}
