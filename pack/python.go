@@ -34,7 +34,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	switch py.Manager {
 	case "uv":
 		steps = append(steps,
-			Copy{From: "ghcr.io/astral-sh/uv:latest", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
+			Copy{From: "ghcr.io/astral-sh/uv:0.13.5", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
 			Env{"UV_PROJECT_ENVIRONMENT", venv},
 			// The venv links to this image's python, which the runtime image also has.
 			Env{"UV_PYTHON_DOWNLOADS", "never"},
