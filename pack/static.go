@@ -35,19 +35,23 @@ const caddyfile = `{
 
 func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 	if len(f.Config.Packages) > 0 {
-		return Runtime{}, fmt.Errorf("static sites run on Caddy's Alpine image, which has no apt; remove packages from wolkpack.toml")
+		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no apt; remove packages from wolkpack.toml")
 	}
 	fallback := ""
 	if spa {
 		fallback = "\ttry_files {path} /index.html\n"
 	}
+	// Caddy's binary is static, so it needs no OS from its Alpine image.
 	return Runtime{
-		From:    "caddy:2.11-alpine",
+		From:    "gcr.io/distroless/static-debian13",
 		Workdir: "/srv",
 		Env:     []Env{{"XDG_CONFIG_HOME", "/tmp/caddy"}, {"XDG_DATA_HOME", "/tmp/caddy"}},
 		Files:   []File{{"/etc/caddy/Caddyfile", fmt.Sprintf(caddyfile, fallback)}},
-		Copies:  []Copy{site},
-		Cmd:     Cmd{"caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"},
+		Copies: []Copy{
+			{From: "caddy:2.11-alpine", Src: []string{"/usr/bin/caddy"}, Dst: "/usr/bin/caddy", RootOwned: true},
+			site,
+		},
+		Cmd: Cmd{"caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"},
 	}, nil
 }
 
