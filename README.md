@@ -1,6 +1,6 @@
 # wolkpack
 
-wolkpack builds a container image from a Node, Python or Go app. You don't write a Dockerfile, and most apps need no config.
+wolkpack builds a container image from a Node, Python or Go app.
 
 ```sh
 wolkpack build ./my-app
