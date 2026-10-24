@@ -1,66 +1,102 @@
 # wolkpack
 
-wolkpack turns an app directory into a container image. Point it at a Node, Python or Go app and it writes a Dockerfile and builds it.
+wolkpack builds a container image from an app directory. It reads the app's manifests, writes a multi-stage Dockerfile, and runs `docker build`. It supports Node, Python and Go.
+
+## Install
+
+You need Go 1.27 and Docker with BuildKit, which Docker 23 and later use by default.
 
 ```sh
+git clone git@github.com:LoriKarikari/wolkpack.git
+cd wolkpack
 go build -o bin/wolkpack ./cmd/wolkpack
-bin/wolkpack plan  e2e/testdata/python-node-assets   # print the Dockerfile
-bin/wolkpack build e2e/testdata/python-node-assets   # build it with docker
 ```
 
-## What it does differently
+## Use
 
-- **The plan is a Dockerfile.** `wolkpack plan` prints a normal multi-stage Dockerfile. Read it, commit it, or edit it and stop using wolkpack. Nothing is hidden in a custom format.
-- **Several languages in one app.** A Python or Go app with a `package.json` that has a `build` script gets its frontend built by Node in a separate stage. The built files are copied into the app before its own build runs. Node itself stays out of the final image.
-- **Ambiguity is an error, not a guess.** A repo with both `go.mod` and `requirements.txt` fails with a message naming both. `--provider` picks one. Nothing depends on the order of a list.
-- **Manifests are parsed, not grepped.** `package.json`, `pyproject.toml`, `requirements.txt` and `go.mod` are parsed once into typed facts. Python dependency names are normalized per PEP 503, so `fastapi-users` doesn't count as `fastapi`.
-- **Version ranges work.** `"engines": {"node": ">=22"}` or `requires-python = ">=3.12"` resolve to the default version if it fits, otherwise the newest supported one. If nothing fits, the build fails and says why.
-- **Non-root and small by default.** Every image runs as UID 1000. Go apps ship as a static binary on distroless, about 14 MB. Node apps whose start command is a plain `node` call run on distroless Node, about 214 MB. Start scripts that need a shell keep the slim Node image.
+```sh
+wolkpack plan  ./my-app            # print the Dockerfile
+wolkpack build ./my-app            # build the image, tagged my-app
+wolkpack build -t api:dev ./my-app # build with a tag you choose
+```
 
-## Supported
+The image listens on `$PORT`, which defaults to 8080:
 
-| Language | Package managers | Start command, in order |
+```sh
+docker run -p 8080:8080 my-app
+```
+
+## How it differs
+
+- **The plan is a Dockerfile.** `wolkpack plan` prints the Dockerfile that `build` uses. You can commit it and run `docker build` yourself without wolkpack.
+- **One app can use several languages.** If a Python or Go app has a `package.json` with a `build` script, Node builds it in its own stage. wolkpack copies the output into the app before the app's own build runs. Node isn't in the final image.
+- **Two runtimes in one repo is an error.** If a repo has both `go.mod` and `requirements.txt`, wolkpack names both and stops. Pick one with `--provider` or in `wolkpack.toml`.
+- **wolkpack reads manifests with real parsers.** It parses `package.json`, `pyproject.toml`, `requirements.txt` and `go.mod`. It normalizes Python package names per PEP 503, so `fastapi-users` doesn't count as FastAPI.
+- **Version ranges work.** For `"engines": {"node": ">=22"}` or `requires-python = ">=3.12"`, wolkpack uses its default version if the range allows it, and otherwise the newest supported version that fits. If none fits, the build fails and lists the supported versions.
+- **Images run as UID 1000.** Go apps ship as a static binary on distroless, about 14 MB. Node apps whose start command is a plain `node` call run on distroless Node, about 214 MB. A start script that needs a shell keeps the slim Node image, about 334 MB.
+
+## Supported apps
+
+| Language | Package managers | Start command, first match wins |
 |---|---|---|
-| Node | npm, pnpm, Yarn 1, Yarn 2+ (including Plug'n'Play), Bun | `scripts.start`, `main`, `server.js`, `index.js`, `server.ts`, `index.ts` |
-| Python | pip (`requirements.txt` or `pyproject.toml`), uv, Poetry | Django via gunicorn, FastAPI via uvicorn, Flask via gunicorn, then `python main.py`, `app.py` or `wsgi.py` |
-| Go | modules | the binary from `main.go` or the single `cmd/<name>` |
+| Node | npm, pnpm, Yarn 1, Yarn 2 and later (including Plug'n'Play), Bun | `scripts.start`, then `main`, `server.js`, `index.js`, `server.ts`, `index.ts` |
+| Python | pip with `requirements.txt` or `pyproject.toml`, uv, Poetry | Django with gunicorn, FastAPI with uvicorn, Flask with gunicorn, then `main.py`, `app.py`, `wsgi.py` |
+| Go | Go modules | the binary built from `main.go`, or from the only `cmd/<name>` |
 
-Django apps with `STATIC_ROOT` set get `collectstatic` at build time, after any Node asset build. Migrations don't run automatically.
+A Django, FastAPI or Flask app must list its server in its dependencies. Without it, the build fails and names the missing package.
 
-Bun apps build and run on the `oven/bun` image instead of `node`.
+For Django apps that set `STATIC_ROOT`, wolkpack runs `collectstatic` during the build, after any Node build. It doesn't run migrations, because several replicas starting at once would run them in parallel.
 
-A `Procfile` `web:` line overrides the start command for any language. The app listens on `$PORT`, which defaults to 8080.
+Bun apps build and run on the `oven/bun` image.
+
+A `web:` line in a `Procfile` replaces the start command for any language.
 
 ## Monorepos
 
-Point wolkpack at one app inside a JS workspace:
+Point wolkpack at one app inside a JavaScript workspace:
 
 ```sh
 wolkpack build apps/web
 ```
 
-wolkpack walks up to the `pnpm-workspace.yaml` or `package.json` `workspaces` that lists the app, and stops at the repo root. It builds from the workspace root, so the lockfile and sibling packages are available. With `turbo.json` it runs `turbo run build --filter=<app>`. With pnpm it runs `pnpm --filter <app>... run build`, which builds sibling packages first. Otherwise it runs the `build` script of each workspace package the app depends on, dependencies first, and then the app's own. The image starts in the app's folder.
+wolkpack looks in parent folders, up to the repo root, for the `pnpm-workspace.yaml` or `package.json` `workspaces` list that includes the app. It builds from that root, so the lockfile and the app's sibling packages are in the build.
 
-The image keeps only the production dependencies of the app and the workspace packages it uses. Dev dependencies and other apps' dependencies are removed after the build. Yarn 1 can't install one member alone, so its images also keep other members' production dependencies.
+It builds the app this way:
 
-A Python or Go app in a subfolder needs nothing special. Point wolkpack at the folder.
+- If the root has `turbo.json`, it runs `turbo run build --filter=<app>`.
+- With pnpm, it runs `pnpm --filter <app>... run build`.
+- Otherwise, it runs the `build` script of each workspace package the app depends on, dependencies first, and then the app's own.
+
+After the build, wolkpack removes dev dependencies and the dependencies of other apps in the workspace. Yarn 1 can't install one workspace member alone, so a Yarn 1 image keeps the other members' production dependencies. The container starts in the app's folder.
+
+A Python or Go app in a subfolder needs no workspace. Point wolkpack at its folder.
 
 ## Config
 
-Most apps need none. When the defaults don't fit, add a `wolkpack.toml` next to the app:
+Most apps need no config. When the defaults don't fit, add a `wolkpack.toml` next to the app:
 
 ```toml
 provider = "python"            # same as --provider; the flag wins
-start = "python serve.py"      # runs through sh; replaces the Procfile web: line
-packages = ["libpq5"]          # apt packages in every build stage and the runtime
-build-packages = ["libpq-dev"] # apt packages in build stages only
+start = "python serve.py"      # runs through sh and replaces the Procfile web: line
+packages = ["libpq5"]          # apt packages for every build stage and the runtime
+build-packages = ["libpq-dev"] # apt packages for build stages only
 ```
 
-Unknown keys fail the build, so a typo can't be silently ignored. Setting `start` or `packages` moves Go and Node apps off distroless onto a Debian image, because distroless has no shell and no apt.
+wolkpack rejects unknown keys, so a misspelled key fails the build. Setting `start` or `packages` moves a Go or Node app from distroless to a Debian image, because distroless has no shell and no apt.
 
 ## Tests
 
-`e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message. An `app` file names a subfolder to build, for monorepos. An `absent` file lists package names that must not be in the image's `node_modules`. Before each build the harness plants a `node_modules` and a `__pycache__` in the app, and fails if either reaches the image.
+`e2e/run.sh` builds every app in `e2e/testdata/`, starts it, and checks its HTTP response against the app's `expect` file. It prints the results and writes them to `e2e/results.tsv`, with each image's size and user. Pass app names to run only those.
+
+A test app can also contain these files:
+
+- `expect-error` holds a message. The build must fail with it.
+- `app` names a subfolder to build, for monorepos.
+- `absent` lists package names that must not be in the image.
+
+Before each build, the script adds a `node_modules` and a `__pycache__` folder to the app. The test fails if either one ends up in the image.
+
+CI runs `go vet`, `gofmt` and `e2e/run.sh` on every push to `main` and on every pull request.
 
 ## License
 
