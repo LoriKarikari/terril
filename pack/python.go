@@ -90,10 +90,10 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		return nil, Runtime{}, err
 	}
 	rt := Runtime{
-		From: image,
-		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "/app/"},
-		Env:  []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
-		Cmd:  start,
+		From:   image,
+		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
+		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
+		Cmd:    start,
 	}
 	if ws := f.UvWorkspace; ws != nil {
 		rt.Workdir = "/app/" + ws.App

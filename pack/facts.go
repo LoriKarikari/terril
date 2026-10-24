@@ -24,6 +24,7 @@ type Facts struct {
 	Node        *Node
 	Python      *Python
 	Go          *modfile.File
+	GoCgo       bool
 	Config      Config
 	// From wolkpack.toml, else the Procfile web: line.
 	Start string
@@ -149,7 +150,10 @@ func Read(dir string) (*Facts, error) {
 		}
 	}
 	if s, ok := f.read("go.mod"); ok {
-		if f.Go, err = modfile.ParseLax("go.mod", []byte(s), nil); err != nil {
+		if f.Go, err = modfile.Parse("go.mod", []byte(s), nil); err != nil {
+			return nil, err
+		}
+		if f.GoCgo, err = goUsesCgo(f); err != nil {
 			return nil, err
 		}
 	}
@@ -370,6 +374,48 @@ func workspacePatterns(dir string) ([]string, error) {
 	return patterns, nil
 }
 
+// Modules that need cgo. A miss fails the build with the package's name, so it can be added here.
+var cgoModules = []string{
+	"github.com/mattn/go-sqlite3",
+	"github.com/confluentinc/confluent-kafka-go",
+	"github.com/confluentinc/confluent-kafka-go/v2",
+}
+
+var importCRe = regexp.MustCompile(`(?m)^\s*(import\s+)?"C"\s*$`)
+
+func goUsesCgo(f *Facts) (bool, error) {
+	for _, r := range f.Go.Require {
+		if slices.Contains(cgoModules, r.Mod.Path) {
+			return true, nil
+		}
+	}
+	found := false
+	err := filepath.WalkDir(f.Dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if p != f.Dir && (name == "vendor" || name == "testdata" || name == "node_modules" || strings.HasPrefix(name, ".") || fileExists(filepath.Join(p, "go.mod"))) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		found = err == nil && importCRe.Match(b)
+		return err
+	})
+	return found, err
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
 
 func readPython(f *Facts) (*Python, error) {
@@ -478,9 +524,4 @@ func procfileWeb(s string) string {
 		}
 	}
 	return ""
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }

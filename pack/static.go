@@ -46,7 +46,7 @@ func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 		Workdir: "/srv",
 		Env:     []Env{{"XDG_CONFIG_HOME", "/tmp/caddy"}, {"XDG_DATA_HOME", "/tmp/caddy"}},
 		Files:   []File{{"/etc/caddy/Caddyfile", fmt.Sprintf(caddyfile, fallback)}},
-		Copy:    site,
+		Copies:  []Copy{site},
 		Cmd:     Cmd{"caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"},
 	}, nil
 }
