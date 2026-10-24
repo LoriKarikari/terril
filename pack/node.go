@@ -72,6 +72,8 @@ var nodeManagers = map[string]nodeManager{
 		install: "yarn install", frozen: "yarn install --frozen-lockfile",
 		prune: "yarn install --production --frozen-lockfile --ignore-scripts --prefer-offline", cache: "/usr/local/share/.cache/yarn",
 		run: "yarn run", start: "npm start", runFile: "node", exec: "yarn",
+		// Yarn 1 can't install one member alone, so other members' production dependencies stay.
+		workspacePrune: func(install, _ string) string { return install + " --production" },
 	},
 	"yarn-berry": {
 		image: nodeImage,
@@ -82,6 +84,10 @@ var nodeManagers = map[string]nodeManager{
 		install: "yarn install", frozen: "yarn install --immutable",
 		prune: "yarn workspaces focus --all --production",
 		run:   "yarn run", start: "npm start", runFile: "node", exec: "yarn",
+		// focus leaves unused zips in the cache, so it refills an empty one.
+		workspacePrune: func(_, pkg string) string {
+			return "rm -rf .yarn/cache && yarn workspaces focus --production " + shellQuote([]string{pkg})
+		},
 	},
 	"bun": {
 		image: func(n *Node) (string, error) {
@@ -94,6 +100,9 @@ var nodeManagers = map[string]nodeManager{
 		install: "bun install", frozen: "bun install --frozen-lockfile",
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
 		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
+		workspacePrune: func(install, pkg string) string {
+			return install + " --production --filter " + shellQuote([]string{pkg})
+		},
 	},
 }
 
