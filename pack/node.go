@@ -2,6 +2,7 @@ package pack
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -264,7 +265,17 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	start, err := nodeStart(f)
 	if err != nil && f.Start == "" {
-		return nil, Runtime{}, err
+		out := viteOutDir(f)
+		if out == "" {
+			return nil, Runtime{}, err
+		}
+		app := ""
+		if f.Workspace != nil {
+			app = f.Workspace.App
+		}
+		site := Copy{From: "build", Src: []string{path.Join("/app", app, out) + "/"}, Dst: "/srv/"}
+		rt, err := staticRuntime(f, site, true)
+		return []Stage{build}, rt, err
 	}
 	env := []Env{{"NODE_ENV", "production"}}
 	if f.Node.PnP {

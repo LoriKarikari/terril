@@ -50,8 +50,11 @@ wolkpack build -t api:dev ./my-app
 | Node | npm, pnpm, Yarn, Bun | any, started with the `start` script |
 | Python | pip, uv, Poetry | Django, FastAPI, Flask |
 | Go | Go modules | any |
+| Static sites | none, or any Node build | plain HTML, Vite apps without a server |
 
 A `web:` line in a `Procfile` replaces the start command.
+
+A folder with only an `index.html`, or a Vite app with no `start` script, is served as a static site by Caddy. Vite apps get single-page-app routing, so `/dashboard` serves `index.html`.
 
 If a Python or Go app has a `package.json` with a `build` script, Node runs that script first. The final image doesn't include Node. For Django apps that set `STATIC_ROOT`, wolkpack then runs `collectstatic`.
 

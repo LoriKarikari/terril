@@ -26,6 +26,7 @@ type Runtime struct {
 	Packages []string
 	Copy     Copy
 	Env      []Env
+	Files    []File
 	Cmd      Cmd
 }
 
@@ -52,6 +53,8 @@ type Copy struct {
 }
 
 type Env struct{ Key, Value string }
+
+type File struct{ Path, Content string }
 
 type User string
 
@@ -85,6 +88,10 @@ func (c Copy) dockerfile() string {
 	return b.String()
 }
 
+func (f File) dockerfile() string {
+	return "COPY <<'EOF' " + f.Path + "\n" + f.Content + "EOF"
+}
+
 func (e Env) dockerfile() string  { return fmt.Sprintf("ENV %s=%q", e.Key, e.Value) }
 func (u User) dockerfile() string { return "USER " + string(u) }
 
@@ -114,6 +121,9 @@ func (r Runtime) stage() Stage {
 	steps = append(steps, Env{"PORT", "8080"})
 	for _, e := range r.Env {
 		steps = append(steps, e)
+	}
+	for _, f := range r.Files {
+		steps = append(steps, f)
 	}
 	steps = append(steps, r.Copy, User(appUser), ClearEntrypoint{}, r.Cmd)
 	return Stage{Name: "runtime", From: r.From, Workdir: r.Workdir, Steps: steps}
