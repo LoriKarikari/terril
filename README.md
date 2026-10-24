@@ -35,11 +35,11 @@ wolkpack build -t api:dev ./my-app # build the image, tagged api:dev
 
 ## Supported apps
 
-| Language | Package managers | Start command, first match wins |
-|---|---|---|
-| Node | npm, pnpm, Yarn, Bun | `scripts.start`, then `main`, `server.js`, `index.js`, `server.ts`, `index.ts` |
-| Python | pip, uv, Poetry | Django or Flask with gunicorn, FastAPI with uvicorn, then `main.py`, `app.py`, `wsgi.py` |
-| Go | Go modules | the binary from `main.go` or the only `cmd/<name>` |
+| Language | Package managers |
+|---|---|
+| Node | npm, pnpm, Yarn, Bun |
+| Python | pip, uv, Poetry |
+| Go | Go modules |
 
 A `web:` line in a `Procfile` replaces the start command.
 
