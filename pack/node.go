@@ -136,6 +136,24 @@ func distrolessBun(f *Facts) (string, []Env, Cmd, bool) {
 	return "oven/bun:" + bunVersion(f.Node) + "-distroless", env, start, true
 }
 
+// Files in node_modules that Node never loads to run an app. License files stay, because
+// many licenses require shipping them. Type declarations stay when the app type-checks at
+// runtime.
+func nodeModulesExcludes(f *Facts) []string {
+	excludes := []string{
+		"**/node_modules/**/*.map",
+		"**/node_modules/**/README.md",
+		"**/node_modules/**/readme.md",
+		"**/node_modules/**/CHANGELOG.md",
+		"**/node_modules/**/HISTORY.md",
+	}
+	deps := f.Node.Package.Dependencies
+	if deps["typescript"] == "" && deps["ts-node"] == "" && deps["tsx"] == "" {
+		excludes = append(excludes, "**/node_modules/**/*.d.ts", "**/node_modules/**/*.d.mts", "**/node_modules/**/*.d.cts")
+	}
+	return excludes
+}
+
 func nodeVersion(n *Node) (string, error) {
 	return pickVersion("node", n.Version, []string{"26", "24", "22"}, "24")
 }
@@ -338,7 +356,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	rt := Runtime{
 		From:   build.From,
-		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
+		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)}},
 		Env:    env,
 		Cmd:    start,
 	}
