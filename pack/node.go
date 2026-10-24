@@ -91,13 +91,7 @@ var nodeManagers = map[string]nodeManager{
 		},
 	},
 	"bun": {
-		image: func(n *Node) (string, error) {
-			v := n.ManagerVersion
-			if v == "" {
-				v = "1"
-			}
-			return "oven/bun:" + v + "-slim", nil
-		},
+		image:   func(n *Node) (string, error) { return "oven/bun:" + bunVersion(n) + "-slim", nil },
 		install: "bun install", frozen: "bun install --frozen-lockfile",
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
 		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
@@ -112,6 +106,52 @@ func (m nodeManager) caches() []string {
 		return nil
 	}
 	return []string{m.cache}
+}
+
+func bunVersion(n *Node) string {
+	if n.ManagerVersion != "" {
+		return n.ManagerVersion
+	}
+	return "1"
+}
+
+// Bun's distroless image has no shell, so the start script must be one bun or node call.
+func distrolessBun(f *Facts) (string, []Env, Cmd, bool) {
+	if f.needsDebianRuntime() {
+		return "", nil, nil, false
+	}
+	var env []Env
+	start, err := nodeStart(f)
+	if err != nil {
+		return "", nil, nil, false
+	}
+	if script := f.Node.Package.Scripts["start"]; script != "" {
+		var args []string
+		var ok bool
+		if env, args, ok = directCommand(script); !ok || (args[0] != "bun" && args[0] != "node") || len(args) < 2 {
+			return "", nil, nil, false
+		}
+		start = append(Cmd{"bun"}, args[1:]...)
+	}
+	return "oven/bun:" + bunVersion(f.Node) + "-distroless", env, start, true
+}
+
+// Files in node_modules that Node never loads to run an app. License files stay, because
+// many licenses require shipping them. Type declarations stay when the app type-checks at
+// runtime.
+func nodeModulesExcludes(f *Facts) []string {
+	excludes := []string{
+		"**/node_modules/**/*.map",
+		"**/node_modules/**/README.md",
+		"**/node_modules/**/readme.md",
+		"**/node_modules/**/CHANGELOG.md",
+		"**/node_modules/**/HISTORY.md",
+	}
+	deps := f.Node.Package.Dependencies
+	if deps["typescript"] == "" && deps["ts-node"] == "" && deps["tsx"] == "" {
+		excludes = append(excludes, "**/node_modules/**/*.d.ts", "**/node_modules/**/*.d.mts", "**/node_modules/**/*.d.cts")
+	}
+	return excludes
 }
 
 func nodeVersion(n *Node) (string, error) {
@@ -244,23 +284,33 @@ func nodeStart(f *Facts) (Cmd, error) {
 }
 
 // Distroless has no shell or npm, so it only runs a start command that is a plain node call.
-func distrolessNode(f *Facts) (string, Cmd, bool) {
+// Distroless has no shell or npm, so the start script must be one node call, or one call to a
+// package bin that package-lock.json maps to a file. check verifies that file is a Node script.
+func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok bool) {
 	v, _ := nodeVersion(f.Node)
 	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
-		return "", nil, false
+		return "", nil, nil, nil, false
 	}
 	start, err := nodeStart(f)
 	if err != nil {
-		return "", nil, false
+		return "", nil, nil, nil, false
 	}
-	if start[0] == "npm" {
-		args := strings.Fields(f.Node.Package.Scripts["start"])
-		if len(args) < 2 || args[0] != "node" || strings.ContainsAny(f.Node.Package.Scripts["start"], "&|;<>()$`'\"\\*?=") {
-			return "", nil, false
+	if script := f.Node.Package.Scripts["start"]; script != "" {
+		var args []string
+		if env, args, ok = directCommand(script); !ok {
+			return "", nil, nil, nil, false
+		}
+		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
+			args = append([]string{"node", bin}, args[1:]...)
+			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote([]string{bin}) + ")\" in '#!'*node*) ;; *) " +
+				"echo " + shellQuote([]string{"wolkpack: " + bin + " isn't a Node script, so it can't run on distroless; set start in wolkpack.toml"}) + " >&2; exit 1;; esac"}
+		}
+		if args[0] != "node" || len(args) < 2 {
+			return "", nil, nil, nil, false
 		}
 		start = Cmd(args)
 	}
-	return "gcr.io/distroless/nodejs" + v + "-debian13", append(Cmd{"/nodejs/bin/node"}, start[1:]...), true
+	return "gcr.io/distroless/nodejs" + v + "-debian13", env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), check, true
 }
 
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -306,12 +356,20 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	rt := Runtime{
 		From:   build.From,
-		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
+		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)}},
 		Env:    env,
 		Cmd:    start,
 	}
-	if image, cmd, ok := distrolessNode(f); ok {
-		rt.From, rt.Cmd = image, cmd
+	if image, startEnv, cmd, check, ok := distrolessNode(f); ok {
+		rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
+		if check != nil {
+			build.Steps = append(build.Steps, *check)
+		}
+	}
+	if f.Node.Manager == "bun" {
+		if image, startEnv, cmd, ok := distrolessBun(f); ok {
+			rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
+		}
 	}
 	if f.Workspace != nil {
 		rt.Workdir = "/app/" + f.Workspace.App

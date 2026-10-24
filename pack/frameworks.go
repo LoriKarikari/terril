@@ -22,7 +22,7 @@ var nodeFrameworks = []nodeFramework{
 		buildEnv: []Env{{"NEXT_PRIVATE_STANDALONE", "true"}},
 		copies: func(f *Facts) []Copy {
 			copies := []Copy{
-				{From: "build", Src: []string{"/app/.next/standalone/"}, Dst: "/app/"},
+				{From: "build", Src: []string{"/app/.next/standalone/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)},
 				{From: "build", Src: []string{"/app/.next/static/"}, Dst: "/app/.next/static/"},
 			}
 			if f.Has("public") {
@@ -37,8 +37,8 @@ var nodeFrameworks = []nodeFramework{
 	{
 		dep:    "nuxt",
 		starts: []string{"", "node .output/server/index.mjs"},
-		copies: func(*Facts) []Copy {
-			return []Copy{{From: "build", Src: []string{"/app/.output/"}, Dst: "/app/.output/"}}
+		copies: func(f *Facts) []Copy {
+			return []Copy{{From: "build", Src: []string{"/app/.output/"}, Dst: "/app/.output/", Exclude: nodeModulesExcludes(f)}}
 		},
 		cmd: Cmd{".output/server/index.mjs"},
 	},
