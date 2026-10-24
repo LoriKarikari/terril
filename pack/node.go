@@ -72,6 +72,8 @@ var nodeManagers = map[string]nodeManager{
 		install: "yarn install", frozen: "yarn install --frozen-lockfile",
 		prune: "yarn install --production --frozen-lockfile --ignore-scripts --prefer-offline", cache: "/usr/local/share/.cache/yarn",
 		run: "yarn run", start: "npm start", runFile: "node", exec: "yarn",
+		// Yarn 1 can't install one member alone, so other members' production dependencies stay.
+		workspacePrune: func(install, _ string) string { return install + " --production" },
 	},
 	"yarn-berry": {
 		image: nodeImage,
@@ -82,6 +84,10 @@ var nodeManagers = map[string]nodeManager{
 		install: "yarn install", frozen: "yarn install --immutable",
 		prune: "yarn workspaces focus --all --production",
 		run:   "yarn run", start: "npm start", runFile: "node", exec: "yarn",
+		// focus leaves unused zips in the cache, so it refills an empty one.
+		workspacePrune: func(_, pkg string) string {
+			return "rm -rf .yarn/cache && yarn workspaces focus --production " + shellQuote([]string{pkg})
+		},
 	},
 	"bun": {
 		image: func(n *Node) (string, error) {
@@ -94,6 +100,9 @@ var nodeManagers = map[string]nodeManager{
 		install: "bun install", frozen: "bun install --frozen-lockfile",
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
 		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
+		workspacePrune: func(install, pkg string) string {
+			return install + " --production --filter " + shellQuote([]string{pkg})
+		},
 	},
 }
 
@@ -183,10 +192,35 @@ func workspaceBuild(f *Facts, m nodeManager) (string, error) {
 		return m.exec + " turbo run build --filter=" + shellQuote([]string{name}), nil
 	case f.Node.Manager == "pnpm":
 		return "pnpm --filter " + shellQuote([]string{name + "..."}) + " run build", nil
-	case f.Node.Package.Scripts["build"] != "":
-		return "cd " + shellQuote([]string{f.Workspace.App}) + " && " + m.run + " build", nil
 	}
-	return "", nil
+	var builds []string
+	for _, dir := range buildOrder(f.Workspace.Members, name) {
+		builds = append(builds, "(cd "+shellQuote([]string{dir})+" && "+m.run+" build)")
+	}
+	return strings.Join(builds, " && "), nil
+}
+
+// buildOrder lists the dirs of name and its workspace dependencies that have a build
+// script, dependencies first.
+func buildOrder(members map[string]Member, name string) []string {
+	var order []string
+	seen := map[string]bool{}
+	var visit func(string)
+	visit = func(n string) {
+		m, ok := members[n]
+		if !ok || seen[n] {
+			return
+		}
+		seen[n] = true
+		for _, d := range m.Deps {
+			visit(d)
+		}
+		if m.Build {
+			order = append(order, m.Dir)
+		}
+	}
+	visit(name)
+	return order
 }
 
 func nodeStart(f *Facts) (Cmd, error) {

@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -28,8 +29,15 @@ type Facts struct {
 
 // A JS workspace the app belongs to. Root is the build context.
 type Workspace struct {
-	Root string
-	App  string
+	Root    string
+	App     string
+	Members map[string]Member
+}
+
+type Member struct {
+	Dir   string
+	Deps  []string
+	Build bool
 }
 
 type Config struct {
@@ -213,15 +221,66 @@ func findWorkspace(dir string) (*Workspace, error) {
 		}
 		rel, _ := filepath.Rel(parent, app)
 		rel = filepath.ToSlash(rel)
-		for _, p := range patterns {
-			if ok, _ := path.Match(p, rel); ok || strings.HasPrefix(rel, strings.TrimSuffix(p, "**")) && strings.HasSuffix(p, "/**") {
-				return &Workspace{Root: parent, App: rel}, nil
-			}
+		if inWorkspace(patterns, rel) {
+			members, err := readMembers(parent, patterns)
+			return &Workspace{Root: parent, App: rel, Members: members}, err
 		}
 		if _, err := os.Stat(filepath.Join(parent, ".git")); err == nil || parent == filepath.Dir(parent) {
 			return nil, nil
 		}
 	}
+}
+
+func inWorkspace(patterns []string, rel string) bool {
+	for _, p := range patterns {
+		if ok, _ := path.Match(p, rel); ok || strings.HasSuffix(p, "/**") && strings.HasPrefix(rel, strings.TrimSuffix(p, "**")) {
+			return true
+		}
+	}
+	return false
+}
+
+func readMembers(root string, patterns []string) (map[string]Member, error) {
+	members := map[string]Member{}
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == ".git") {
+			return filepath.SkipDir
+		}
+		if d.Name() != "package.json" || p == filepath.Join(root, "package.json") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, filepath.Dir(p))
+		rel = filepath.ToSlash(rel)
+		if !inWorkspace(patterns, rel) {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		var pkg struct {
+			Name            string            `json:"name"`
+			Scripts         map[string]string `json:"scripts"`
+			Dependencies    map[string]string `json:"dependencies"`
+			DevDependencies map[string]string `json:"devDependencies"`
+		}
+		if err := json.Unmarshal(b, &pkg); err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+		m := Member{Dir: rel, Build: pkg.Scripts["build"] != ""}
+		for _, deps := range []map[string]string{pkg.Dependencies, pkg.DevDependencies} {
+			for name := range deps {
+				m.Deps = append(m.Deps, name)
+			}
+		}
+		slices.Sort(m.Deps)
+		members[pkg.Name] = m
+		return nil
+	})
+	return members, err
 }
 
 func workspacePatterns(dir string) ([]string, error) {

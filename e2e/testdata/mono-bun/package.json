@@ -1,0 +1,1 @@
+{ "name": "mono-bun", "private": true, "workspaces": ["apps/*", "packages/*"] }
