@@ -1,0 +1,43 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "mono-bun",
+    },
+    "apps/admin": {
+      "name": "@mono/admin",
+      "dependencies": {
+        "left-pad": "1.3.0",
+      },
+    },
+    "apps/web": {
+      "name": "@mono/web",
+      "dependencies": {
+        "@mono/greeting": "workspace:*",
+      },
+      "devDependencies": {
+        "prettier": "3.6.2",
+      },
+    },
+    "packages/greeting": {
+      "name": "@mono/greeting",
+      "dependencies": {
+        "ms": "2.1.3",
+      },
+    },
+  },
+  "packages": {
+    "@mono/admin": ["@mono/admin@workspace:apps/admin"],
+
+    "@mono/greeting": ["@mono/greeting@workspace:packages/greeting"],
+
+    "@mono/web": ["@mono/web@workspace:apps/web"],
+
+    "left-pad": ["left-pad@1.3.0", "", {}, "sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA=="],
+
+    "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
+
+    "prettier": ["prettier@3.6.2", "", { "bin": { "prettier": "bin/prettier.cjs" } }, "sha512-I7AIg5boAr5R0FFtJ6rCfD+LFsWHp81dolrFD8S79U9tb8Az2nGrJncnMSnys+bpQJfRUzqs9hnA81OAA3hCuQ=="],
+  }
+}

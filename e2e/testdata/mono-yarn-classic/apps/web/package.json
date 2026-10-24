@@ -1,0 +1,1 @@
+{ "name": "@mono/web", "version": "1.0.0", "scripts": { "build": "node build.js", "start": "node dist/server.js" }, "dependencies": { "@mono/greeting": "*" }, "devDependencies": { "prettier": "3.6.2" } }
