@@ -57,11 +57,13 @@ type Node struct {
 }
 
 type PackageJSON struct {
-	Name           string            `json:"name"`
-	Main           string            `json:"main"`
-	Scripts        map[string]string `json:"scripts"`
-	PackageManager string            `json:"packageManager"`
-	Engines        struct {
+	Name            string            `json:"name"`
+	Main            string            `json:"main"`
+	Scripts         map[string]string `json:"scripts"`
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+	PackageManager  string            `json:"packageManager"`
+	Engines         struct {
 		Node string `json:"node"`
 	} `json:"engines"`
 }

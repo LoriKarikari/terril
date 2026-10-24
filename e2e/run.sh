@@ -72,17 +72,18 @@ for name in "${names[@]}"; do
   cid=$(docker run -d -p 127.0.0.1::8080 "$image")
   port=$(docker port "$cid" 8080 | head -1 | cut -d: -f2)
   want=$(cat "e2e/testdata/$name/expect")
+  path=$(cat "e2e/testdata/$name/path" 2>/dev/null || echo /)
   body=""
   for _ in $(seq 1 30); do
-    body=$(curl -fsS "http://127.0.0.1:$port/" 2>/dev/null) && [[ "$body" == *"$want"* ]] && break
+    body=$(curl -fsS "http://127.0.0.1:$port$path" 2>/dev/null) && [[ "$body" == *"$want"* ]] && break
     sleep 1
   done
   docker logs "$cid" >>"$log" 2>&1
   docker rm -f "$cid" >/dev/null
   if [[ "$body" == *"$want"* ]]; then
-    record "$name" PASS "$provider" "$size" "$user" "got: $(echo "$body" | head -c 60)"
+    record "$name" PASS "$provider" "$size" "$user" "got: $(echo "$body" | tr -s "\n\t" "  " | head -c 60)"
   else
-    record "$name" FAIL "$provider" "$size" "$user" "wanted '$want', got '$(echo "$body" | head -c 60)'"
+    record "$name" FAIL "$provider" "$size" "$user" "wanted '$want', got '$(echo "$body" | tr -s "\n\t" "  " | head -c 60)'"
   fi
 done
 
