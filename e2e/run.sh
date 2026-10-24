@@ -68,7 +68,7 @@ for name in "${names[@]}"; do
   shipped=""
   if [ -f "e2e/testdata/$name/absent" ]; then
     while read -r pkg; do
-      grep -qE "node_modules/(\.pnpm/|\.bun/)?$pkg[@/]|\.yarn/cache/$pkg-npm-" <<<"$files" && shipped="$shipped $pkg"
+      grep -qE "node_modules/(\.pnpm/|\.bun/)?$pkg[@/]|\.yarn/cache/$pkg-npm-|site-packages/$pkg/" <<<"$files" && shipped="$shipped $pkg"
     done <"e2e/testdata/$name/absent"
   fi
   if [ -n "$shipped" ]; then
