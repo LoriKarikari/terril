@@ -31,6 +31,18 @@ Bun apps build and run on the `oven/bun` image instead of `node`.
 
 A `Procfile` `web:` line overrides the start command for any language. The app listens on `$PORT`, which defaults to 8080.
 
+## Monorepos
+
+Point wolkpack at one app inside a JS workspace:
+
+```sh
+wolkpack build apps/web
+```
+
+wolkpack walks up to the `pnpm-workspace.yaml` or `package.json` `workspaces` that lists the app, and stops at the repo root. It builds from the workspace root, so the lockfile and sibling packages are available. With `turbo.json` it runs `turbo run build --filter=<app>`. With pnpm it runs `pnpm --filter <app>... run build`, which builds sibling packages first. Otherwise it runs the app's own `build` script. The image starts in the app's folder.
+
+A Python or Go app in a subfolder needs nothing special. Point wolkpack at the folder.
+
 ## Config
 
 Most apps need none. When the defaults don't fit, add a `wolkpack.toml` next to the app:
@@ -46,7 +58,7 @@ Unknown keys fail the build, so a typo can't be silently ignored. Setting `start
 
 ## Tests
 
-`e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message.
+`e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message. An `app` file names a subfolder to build, for monorepos. Before each build the harness plants a `node_modules` and a `__pycache__` in the app, and fails if either reaches the image.
 
 ## License
 
