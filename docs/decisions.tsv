@@ -1,0 +1,15 @@
+ts	phase	decision	why	evidence	result
+2026-10-24T09:29:54Z	frame	started from an empty repo with no borrowed code	the user asked for a clean start	git log	done
+2026-10-24T09:29:54Z	design	plans render to a plain Dockerfile and build with docker build	users can read and eject the output, and it needs no custom BuildKit frontend	pack/plan.go	done
+2026-10-24T09:29:54Z	design	providers are a table with roles: primary runs the app, assets builds files for it	multi-language support falls out of multi-stage builds instead of per-language special cases	pack/pack.go	done
+2026-10-24T09:29:54Z	design	node only takes the assets role when package.json has a build script	a package.json for prettier or husky shouldn't add a node build to a python app	pack/node.go	done
+2026-10-24T09:29:54Z	design	two primary languages is an error that names both, with --provider to choose	silent first-match order picks the wrong runtime for mixed repos	examples/go-and-python	PASS
+2026-10-24T09:29:54Z	design	parse manifests once into typed facts and normalize python names per PEP 503	substring matching on dependency files misdetects frameworks	pack/facts.go	done
+2026-10-24T09:29:54Z	design	one version resolver for node and python that accepts ranges	exact pins pass through, ranges pick the default if it fits, otherwise newest supported	pack/version.go	done
+2026-10-24T09:29:54Z	design	every runtime image runs as uid 1000; go ships on distroless static	root by default is a security footgun; go needs no OS	e2e/results.tsv user column	PASS
+2026-10-24T09:29:54Z	scope	left out yarn, bun, poetry, django, flask and monorepos	no example proves them yet; each gets a clear unsupported error instead	pack/node.go, pack/python.go	open
+2026-10-24T09:29:54Z	harness	wrote e2e/run.sh and 7 examples before the code	the e2e run is the only test and its results.tsv is the artifact	e2e/run.sh	done
+2026-10-24T09:29:54Z	harness	e2e uses a throwaway DOCKER_CONFIG	the host config points at docker-credential-desktop.exe, which is missing under WSL; left the user config alone	e2e/logs/go-http.log first run	fixed
+2026-10-24T09:29:54Z	verify	all 7 examples pass e2e	built, ran and curled each image	e2e/results.tsv	PASS
+2026-10-24T09:29:54Z	verify	the python+node image has no node binary and no node_modules	checked inside the container, not just the size	docker run ... command -v node	PASS
+2026-10-24T09:32:32Z	harness	dropped the throwaway DOCKER_CONFIG from e2e/run.sh	the user runs native docker; removed the stale desktop.exe credsStore from ~/.docker/config.json instead	e2e/results.tsv rerun	PASS, supersedes the earlier workaround row
