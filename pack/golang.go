@@ -47,9 +47,9 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		base = "debian:trixie-slim"
 	}
 	return []Stage{{Name: "build", From: "golang:" + version, Steps: steps}}, Runtime{
-		From: base,
-		Copy: Copy{From: "build", Src: []string{"/out/app"}, Dst: "/app/app"},
-		Cmd:  Cmd{"/app/app"},
+		From:   base,
+		Copies: []Copy{{From: "build", Src: []string{"/out/app"}, Dst: "/app/app"}},
+		Cmd:    Cmd{"/app/app"},
 	}, nil
 }
 

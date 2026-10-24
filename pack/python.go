@@ -73,10 +73,10 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		return nil, Runtime{}, err
 	}
 	return []Stage{{Name: "build", From: image, Steps: steps}}, Runtime{
-		From: image,
-		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
-		Env:  []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
-		Cmd:  start,
+		From:   image,
+		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "./"}},
+		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
+		Cmd:    start,
 	}, nil
 }
 
