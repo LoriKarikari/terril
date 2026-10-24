@@ -23,6 +23,7 @@ type Facts struct {
 	UvWorkspace *Workspace
 	Node        *Node
 	Python      *Python
+	Ruby        *Ruby
 	Go          *modfile.File
 	GoCgo       bool
 	Config      Config
@@ -83,6 +84,12 @@ type Python struct {
 	Version      string
 }
 
+type Ruby struct {
+	Version string
+	// Gem names from Gemfile.lock, including dependencies of dependencies.
+	Gems map[string]bool
+}
+
 func (f *Facts) Has(name string) bool {
 	_, err := os.Stat(filepath.Join(f.Dir, name))
 	return err == nil
@@ -134,6 +141,9 @@ func Read(dir string) (*Facts, error) {
 		return nil, err
 	}
 	if f.Python, err = readPython(f); err != nil {
+		return nil, err
+	}
+	if f.Ruby, err = readRuby(f); err != nil {
 		return nil, err
 	}
 	if f.Python != nil && f.Workspace == nil {
@@ -477,6 +487,44 @@ func lockBins(lock string) (map[string]string, error) {
 		}
 	}
 	return bins, nil
+}
+
+var (
+	lockGemRe         = regexp.MustCompile(`(?m)^    ([A-Za-z0-9_.-]+) \(`)
+	lockSectionRe     = regexp.MustCompile(`(?m)^([A-Z][A-Z ]*)\n((?:  .*\n?)*)`)
+	gemfileRubyRe     = regexp.MustCompile(`(?m)^\s*ruby\s+["']([^"']+)["']`)
+	rubyVersionNumber = regexp.MustCompile(`\d+(\.\d+){0,2}`)
+)
+
+func readRuby(f *Facts) (*Ruby, error) {
+	if !f.Has("Gemfile") {
+		return nil, nil
+	}
+	lock, ok := f.read("Gemfile.lock")
+	if !ok {
+		return nil, fmt.Errorf("Gemfile has no Gemfile.lock; run bundle lock and commit it")
+	}
+	r := &Ruby{Gems: map[string]bool{}}
+	for _, m := range lockGemRe.FindAllStringSubmatch(lock, -1) {
+		r.Gems[m[1]] = true
+	}
+	sections := map[string][]string{}
+	for _, m := range lockSectionRe.FindAllStringSubmatch(lock, -1) {
+		sections[m[1]] = strings.Fields(m[2])
+	}
+	platforms := sections["PLATFORMS"]
+	if !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }) {
+		return nil, fmt.Errorf("Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
+			strings.Join(platforms, ", "))
+	}
+	if v := f.firstLine(".ruby-version"); v != "" {
+		r.Version = rubyVersionNumber.FindString(v)
+	} else if v := sections["RUBY VERSION"]; len(v) > 1 {
+		r.Version = rubyVersionNumber.FindString(v[1])
+	} else if gemfile, _ := f.read("Gemfile"); gemfileRubyRe.MatchString(gemfile) {
+		r.Version = gemfileRubyRe.FindStringSubmatch(gemfile)[1]
+	}
+	return r, nil
 }
 
 var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
