@@ -15,7 +15,7 @@ bin/wolkpack build e2e/testdata/python-node-assets   # build it with docker
 - **Ambiguity is an error, not a guess.** A repo with both `go.mod` and `requirements.txt` fails with a message naming both. `--provider` picks one. Nothing depends on the order of a list.
 - **Manifests are parsed, not grepped.** `package.json`, `pyproject.toml`, `requirements.txt` and `go.mod` are parsed once into typed facts. Python dependency names are normalized per PEP 503, so `fastapi-users` doesn't count as `fastapi`.
 - **Version ranges work.** `"engines": {"node": ">=22"}` or `requires-python = ">=3.12"` resolve to the default version if it fits, otherwise the newest supported one. If nothing fits, the build fails and says why.
-- **Non-root by default.** Every image runs as UID 1000. Go apps ship as a static binary on distroless, about 14 MB.
+- **Non-root and small by default.** Every image runs as UID 1000. Go apps ship as a static binary on distroless, about 14 MB. Node apps whose start command is a plain `node` call run on distroless Node, about 214 MB. Start scripts that need a shell keep the slim Node image.
 
 ## Supported
 
