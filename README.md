@@ -13,6 +13,8 @@ wolkpack reads the app's manifest and lockfile to work out how to install, build
 
 The app builds in one image and runs in a separate, smaller one that contains only what it needs at runtime. That image runs as a non-root user and listens on `$PORT`, which defaults to 8080.
 
+The runtime image is distroless, so it has no shell or package manager. Apps get a Debian image instead when their start command needs a shell or `wolkpack.toml` adds apt packages.
+
 ## Install
 
 You need Go 1.27 and Docker 23 or later.
