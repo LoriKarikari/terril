@@ -4,8 +4,8 @@ wolkpack turns an app directory into a container image. Point it at a Node, Pyth
 
 ```sh
 go build -o bin/wolkpack ./cmd/wolkpack
-bin/wolkpack plan  examples/python-node-assets   # print the Dockerfile
-bin/wolkpack build examples/python-node-assets   # build it with docker
+bin/wolkpack plan  e2e/testdata/python-node-assets   # print the Dockerfile
+bin/wolkpack build e2e/testdata/python-node-assets   # build it with docker
 ```
 
 ## What it does differently
@@ -29,7 +29,7 @@ A `Procfile` `web:` line overrides the start command for any language. The app l
 
 ## Tests
 
-`e2e/run.sh` builds every app in `examples/`, runs it and checks its HTTP response. It writes `e2e/results.tsv` with each image's size and user. An example with an `expect-error` file must fail to build with that message.
+`e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message.
 
 ## License
 

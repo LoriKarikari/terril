@@ -1,8 +1,0 @@
-example	status	provider	image_mb	user	detail
-go-and-python	PASS	-	-	-	failed as expected
-go-http	PASS	go	14	1000:1000	got: hello from go
-node-http	PASS	node	330	1000:1000	got: hello from node v24.22.1
-node-pnpm	PASS	node	330	1000:1000	got: built by pnpm 1m
-python-fastapi	PASS	python	215	1000:1000	got: "hello from fastapi"
-python-node-assets	PASS	python + assets from node	215	1000:1000	got: <h1>assets built by node, served by python</h1>
-python-uv	PASS	python	200	1000:1000	got: "hello from uv"

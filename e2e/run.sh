@@ -14,10 +14,10 @@ record() {
 }
 
 names=("$@")
-[ ${#names[@]} -eq 0 ] && names=($(ls examples))
+[ ${#names[@]} -eq 0 ] && names=($(ls e2e/testdata))
 
 for name in "${names[@]}"; do
-  dir=examples/$name
+  dir=e2e/testdata/$name
   image=wolkpack-e2e-$name
   log=e2e/logs/$name.log
   mkdir -p e2e/logs
