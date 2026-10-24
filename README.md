@@ -21,11 +21,13 @@ bin/wolkpack build e2e/testdata/python-node-assets   # build it with docker
 
 | Language | Package managers | Start command, in order |
 |---|---|---|
-| Node | npm, pnpm | `scripts.start`, `main`, `server.js`, `index.js` |
-| Python | pip (`requirements.txt` or `pyproject.toml`), uv | Django via gunicorn, FastAPI via uvicorn, Flask via gunicorn, then `python main.py`, `app.py` or `wsgi.py` |
+| Node | npm, pnpm, Yarn 1, Yarn 2+ (including Plug'n'Play), Bun | `scripts.start`, `main`, `server.js`, `index.js`, `server.ts`, `index.ts` |
+| Python | pip (`requirements.txt` or `pyproject.toml`), uv, Poetry | Django via gunicorn, FastAPI via uvicorn, Flask via gunicorn, then `python main.py`, `app.py` or `wsgi.py` |
 | Go | modules | the binary from `main.go` or the single `cmd/<name>` |
 
 Django apps with `STATIC_ROOT` set get `collectstatic` at build time, after any Node asset build. Migrations don't run automatically.
+
+Bun apps build and run on the `oven/bun` image instead of `node`.
 
 A `Procfile` `web:` line overrides the start command for any language. The app listens on `$PORT`, which defaults to 8080.
 
