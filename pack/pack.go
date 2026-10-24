@@ -20,7 +20,7 @@ type provider struct {
 	assetStage func(f *Facts, name string) (Stage, error)
 }
 
-var providers = []provider{goProvider, pythonProvider, nodeProvider}
+var providers = []provider{goProvider, pythonProvider, nodeProvider, staticProvider}
 
 func New(f *Facts, forceProvider string) (*Plan, error) {
 	roles := map[string]Role{}
@@ -99,7 +99,7 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 
 	switch len(candidates) {
 	case 0:
-		return provider{}, fmt.Errorf("no package.json, requirements.txt, pyproject.toml or go.mod found; don't know how to build this app")
+		return provider{}, fmt.Errorf("no package.json, requirements.txt, pyproject.toml, go.mod or index.html found; don't know how to build this app")
 	case 1:
 		return candidates[0], nil
 	}
