@@ -161,7 +161,7 @@ func nodeStart(f *Facts) (Cmd, error) {
 // Distroless has no shell or npm, so it only runs a start command that is a plain node call.
 func distrolessNode(f *Facts) (string, Cmd, bool) {
 	v, _ := nodeVersion(f.Node)
-	if f.ProcfileWeb != "" || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
+	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
 		return "", nil, false
 	}
 	start, err := nodeStart(f)
@@ -184,7 +184,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		return nil, Runtime{}, err
 	}
 	start, err := nodeStart(f)
-	if err != nil && f.ProcfileWeb == "" {
+	if err != nil && f.Start == "" {
 		return nil, Runtime{}, err
 	}
 	env := []Env{{"NODE_ENV", "production"}}

@@ -31,6 +31,19 @@ Bun apps build and run on the `oven/bun` image instead of `node`.
 
 A `Procfile` `web:` line overrides the start command for any language. The app listens on `$PORT`, which defaults to 8080.
 
+## Config
+
+Most apps need none. When the defaults don't fit, add a `wolkpack.toml` next to the app:
+
+```toml
+provider = "python"            # same as --provider; the flag wins
+start = "python serve.py"      # runs through sh; replaces the Procfile web: line
+packages = ["libpq5"]          # apt packages in every build stage and the runtime
+build-packages = ["libpq-dev"] # apt packages in build stages only
+```
+
+Unknown keys fail the build, so a typo can't be silently ignored. Setting `start` or `packages` moves Go and Node apps off distroless onto a Debian image, because distroless has no shell and no apt.
+
 ## Tests
 
 `e2e/run.sh` builds every app in `e2e/testdata/`, runs it and checks its HTTP response. It prints and writes `e2e/results.tsv` with each image's size and user. An app with an `expect-error` file must fail to build with that message.

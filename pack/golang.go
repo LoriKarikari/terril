@@ -42,10 +42,9 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	steps = append(steps, copyAssets(assets)...)
 	steps = append(steps, Run{Cmd: "CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app " + pkg, Caches: caches})
 
-	// A static binary needs no OS. A Procfile command needs a shell.
 	base := "gcr.io/distroless/static-debian12"
-	if f.ProcfileWeb != "" {
-		base = "debian:bookworm-slim"
+	if f.needsDebianRuntime() {
+		base = "debian:trixie-slim"
 	}
 	return []Stage{{Name: "build", From: "golang:" + version, Steps: steps}}, Runtime{
 		From: base,

@@ -19,10 +19,11 @@ type Plan struct {
 }
 
 type Runtime struct {
-	From string
-	Copy Copy
-	Env  []Env
-	Cmd  Cmd
+	From     string
+	Packages []string
+	Copy     Copy
+	Env      []Env
+	Cmd      Cmd
 }
 
 type Stage struct {
@@ -102,12 +103,21 @@ func copyAssets(stages []string) []Step {
 
 func (r Runtime) stage() Stage {
 	r.Copy.Chown = true
-	steps := []Step{Env{"PORT", "8080"}}
+	var steps []Step
+	if len(r.Packages) > 0 {
+		steps = append(steps, aptInstall(r.Packages))
+	}
+	steps = append(steps, Env{"PORT", "8080"})
 	for _, e := range r.Env {
 		steps = append(steps, e)
 	}
 	steps = append(steps, r.Copy, User(appUser), ClearEntrypoint{}, r.Cmd)
 	return Stage{Name: "runtime", From: r.From, Steps: steps}
+}
+
+func aptInstall(packages []string) Run {
+	return Run{Cmd: "apt-get update && apt-get install -y --no-install-recommends " +
+		strings.Join(packages, " ") + " && rm -rf /var/lib/apt/lists/*"}
 }
 
 func (p *Plan) Dockerfile() string {

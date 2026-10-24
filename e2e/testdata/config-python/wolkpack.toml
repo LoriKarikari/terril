@@ -1,0 +1,3 @@
+provider = "python"
+start = "python serve.py"
+packages = ["jq"]
