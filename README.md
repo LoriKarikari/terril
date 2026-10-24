@@ -27,10 +27,22 @@ go build -o bin/wolkpack ./cmd/wolkpack
 
 ## Use
 
+Print the Dockerfile wolkpack would build:
+
 ```sh
-wolkpack plan  ./my-app            # print the Dockerfile
-wolkpack build ./my-app            # build the image, tagged my-app
-wolkpack build -t api:dev ./my-app # build the image, tagged api:dev
+wolkpack plan ./my-app
+```
+
+Build the image. It gets the folder's name as its tag, here `my-app`:
+
+```sh
+wolkpack build ./my-app
+```
+
+Build the image with your own tag:
+
+```sh
+wolkpack build -t api:dev ./my-app
 ```
 
 ## Supported apps
