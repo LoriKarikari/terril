@@ -91,13 +91,7 @@ var nodeManagers = map[string]nodeManager{
 		},
 	},
 	"bun": {
-		image: func(n *Node) (string, error) {
-			v := n.ManagerVersion
-			if v == "" {
-				v = "1"
-			}
-			return "oven/bun:" + v + "-slim", nil
-		},
+		image:   func(n *Node) (string, error) { return "oven/bun:" + bunVersion(n) + "-slim", nil },
 		install: "bun install", frozen: "bun install --frozen-lockfile",
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
 		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
@@ -112,6 +106,34 @@ func (m nodeManager) caches() []string {
 		return nil
 	}
 	return []string{m.cache}
+}
+
+func bunVersion(n *Node) string {
+	if n.ManagerVersion != "" {
+		return n.ManagerVersion
+	}
+	return "1"
+}
+
+// Bun's distroless image has no shell, so the start script must be one bun or node call.
+func distrolessBun(f *Facts) (string, []Env, Cmd, bool) {
+	if f.needsDebianRuntime() {
+		return "", nil, nil, false
+	}
+	var env []Env
+	start, err := nodeStart(f)
+	if err != nil {
+		return "", nil, nil, false
+	}
+	if script := f.Node.Package.Scripts["start"]; script != "" {
+		var args []string
+		var ok bool
+		if env, args, ok = directCommand(script); !ok || (args[0] != "bun" && args[0] != "node") || len(args) < 2 {
+			return "", nil, nil, false
+		}
+		start = append(Cmd{"bun"}, args[1:]...)
+	}
+	return "oven/bun:" + bunVersion(f.Node) + "-distroless", env, start, true
 }
 
 func nodeVersion(n *Node) (string, error) {
@@ -312,6 +334,11 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	if image, cmd, ok := distrolessNode(f); ok {
 		rt.From, rt.Cmd = image, cmd
+	}
+	if f.Node.Manager == "bun" {
+		if image, startEnv, cmd, ok := distrolessBun(f); ok {
+			rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
+		}
 	}
 	if f.Workspace != nil {
 		rt.Workdir = "/app/" + f.Workspace.App
