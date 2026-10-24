@@ -1,0 +1,25 @@
+name: Idea or feature request
+description: An app wolkpack could build, or a change to how it works.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Describe the problem before the solution. New languages and contract changes are agreed on here before anyone builds them. See CONTRIBUTING.md.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What app you're trying to build, and why wolkpack gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: A solution, if you have one in mind.
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Contract
+      options:
+        - label: This would change CLI flags or `wolkpack.toml`.
