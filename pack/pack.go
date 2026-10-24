@@ -28,6 +28,9 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 		roles[p.name] = p.detect(f)
 	}
 
+	if forceProvider == "" {
+		forceProvider = f.Config.Provider
+	}
 	primary, err := pickPrimary(roles, forceProvider)
 	if err != nil {
 		return nil, err
@@ -55,9 +58,15 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	}
 	plan.Stages = append(plan.Stages, stages...)
 	plan.Runtime = rt
-	if f.ProcfileWeb != "" {
-		plan.Runtime.Cmd = Cmd{"sh", "-c", f.ProcfileWeb}
+	if f.Start != "" {
+		plan.Runtime.Cmd = Cmd{"sh", "-c", f.Start}
 	}
+	if build := append(f.Config.Packages, f.Config.BuildPackages...); len(build) > 0 {
+		for i := range plan.Stages {
+			plan.Stages[i].Steps = append([]Step{aptInstall(build)}, plan.Stages[i].Steps...)
+		}
+	}
+	plan.Runtime.Packages = f.Config.Packages
 	return plan, nil
 }
 

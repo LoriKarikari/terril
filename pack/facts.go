@@ -18,8 +18,16 @@ type Facts struct {
 	Node   *Node
 	Python *Python
 	Go     *modfile.File
+	Config Config
+	// From wolkpack.toml, else the Procfile web: line.
+	Start string
+}
 
-	ProcfileWeb string
+type Config struct {
+	Provider      string   `toml:"provider"`
+	Start         string   `toml:"start"`
+	Packages      []string `toml:"packages"`
+	BuildPackages []string `toml:"build-packages"`
 }
 
 type Node struct {
@@ -84,7 +92,15 @@ func Read(dir string) (*Facts, error) {
 		}
 	}
 	if s, ok := f.read("Procfile"); ok {
-		f.ProcfileWeb = procfileWeb(s)
+		f.Start = procfileWeb(s)
+	}
+	if s, ok := f.read("wolkpack.toml"); ok {
+		if f.Config, err = parseConfig(s); err != nil {
+			return nil, err
+		}
+	}
+	if f.Config.Start != "" {
+		f.Start = f.Config.Start
 	}
 	return f, nil
 }
@@ -213,6 +229,30 @@ func requirementNames(s string) []string {
 		}
 	}
 	return names
+}
+
+var aptPackageRe = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`)
+
+func parseConfig(s string) (Config, error) {
+	var c Config
+	md, err := toml.Decode(s, &c)
+	if err != nil {
+		return c, fmt.Errorf("wolkpack.toml: %w", err)
+	}
+	if keys := md.Undecoded(); len(keys) > 0 {
+		return c, fmt.Errorf("wolkpack.toml: unknown key %q (have: provider, start, packages, build-packages)", keys[0].String())
+	}
+	for _, p := range append(c.Packages, c.BuildPackages...) {
+		if !aptPackageRe.MatchString(p) {
+			return c, fmt.Errorf("wolkpack.toml: %q isn't a Debian package name", p)
+		}
+	}
+	return c, nil
+}
+
+// Distroless images have no shell for a custom start command and no apt for packages.
+func (f *Facts) needsDebianRuntime() bool {
+	return f.Start != "" || len(f.Config.Packages) > 0
 }
 
 func procfileWeb(s string) string {
