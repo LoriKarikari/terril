@@ -9,7 +9,7 @@ docker run -p 8080:8080 my-app
 
 ## How it works
 
-1. wolkpack reads `package.json`, `requirements.txt`, `pyproject.toml` or `go.mod`. From them it gets the language, package manager, version and start command.
+1. wolkpack reads the app's manifest and lockfile to find out how to install, build and start it.
 2. It writes a multi-stage Dockerfile. `wolkpack plan` prints it.
 3. It runs `docker build` with that Dockerfile.
 
