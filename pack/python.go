@@ -53,8 +53,14 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		} else if len(py.Requirements) > 0 {
 			steps = append(steps, Run{Cmd: "pip install " + shellQuote(py.Requirements), Caches: pipCache})
 		}
-	default:
-		return nil, Runtime{}, fmt.Errorf("%s isn't supported yet; use pip or uv", py.Manager)
+	case "poetry":
+		steps = append(steps,
+			Run{Cmd: "pip install poetry==2.5.1", Caches: []string{"/root/.cache/pip"}},
+			Env{"POETRY_VIRTUALENVS_IN_PROJECT", "true"},
+			Env{"POETRY_NO_INTERACTION", "1"},
+			Copy{Src: []string{"pyproject.toml", "poetry.lock"}, Dst: "./"},
+			Run{Cmd: "poetry install --only main --no-root", Caches: []string{"/root/.cache/pypoetry"}},
+		)
 	}
 	steps = append(steps, copySource())
 	steps = append(steps, copyAssets(assets)...)
