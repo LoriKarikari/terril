@@ -1,0 +1,10 @@
+{
+  "name": "yb",
+  "packageManager": "yarn@4.18.1",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ms": "2.1.3"
+  }
+}

@@ -1,6 +1,9 @@
 package pack
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 var nodeProvider = provider{
 	name: "node",
@@ -20,66 +23,131 @@ var nodeProvider = provider{
 	},
 }
 
-func nodeImage(f *Facts) (string, error) {
-	v, err := pickVersion("node", f.Node.Version, []string{"26", "24", "22"}, "24")
-	return "node:" + v + "-slim", err
+type nodeManager struct {
+	image               func(n *Node) (string, error)
+	setup               func(n *Node) []Step
+	install, frozen     string
+	prune, cache        string
+	run, start, runFile string
 }
 
-var nodeInstall = map[string]struct {
-	install, frozen, prune, cache string
-}{
-	"npm":  {"npm install", "npm ci", "npm prune --omit=dev", "/root/.npm"},
-	"pnpm": {"pnpm install", "pnpm install --frozen-lockfile", "pnpm prune --prod", "/root/.local/share/pnpm/store"},
+var corepackYarn = func(*Node) []Step {
+	return []Step{
+		Env{"COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"},
+		Env{"COREPACK_ENABLE_AUTO_PIN", "0"},
+		Run{Cmd: "npm install -g --force corepack@0.36.0 && corepack enable yarn", Caches: []string{"/root/.npm"}},
+	}
+}
+
+var nodeManagers = map[string]nodeManager{
+	"npm": {
+		image: nodeImage, install: "npm install", frozen: "npm ci",
+		prune: "npm prune --omit=dev", cache: "/root/.npm",
+		run: "npm run", start: "npm start", runFile: "node",
+	},
+	"pnpm": {
+		image: nodeImage,
+		setup: func(n *Node) []Step {
+			v := n.ManagerVersion
+			if v == "" {
+				v = "latest"
+			}
+			return []Step{Run{Cmd: "npm install -g pnpm@" + v, Caches: []string{"/root/.npm"}}}
+		},
+		install: "pnpm install", frozen: "pnpm install --frozen-lockfile",
+		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
+		run: "pnpm run", start: "npm start", runFile: "node",
+	},
+	"yarn": {
+		image: nodeImage, setup: corepackYarn,
+		install: "yarn install", frozen: "yarn install --frozen-lockfile",
+		prune: "yarn install --production --frozen-lockfile --ignore-scripts --prefer-offline", cache: "/usr/local/share/.cache/yarn",
+		run: "yarn run", start: "npm start", runFile: "node",
+	},
+	"yarn-berry": {
+		image: nodeImage,
+		setup: func(n *Node) []Step {
+			// Plug'n'Play loads packages from the cache at runtime, so it has to live in the image.
+			return append(corepackYarn(n), Env{"YARN_ENABLE_GLOBAL_CACHE", "false"})
+		},
+		install: "yarn install", frozen: "yarn install --immutable",
+		prune: "yarn workspaces focus --all --production",
+		run:   "yarn run", start: "npm start", runFile: "node",
+	},
+	"bun": {
+		image: func(n *Node) (string, error) {
+			v := n.ManagerVersion
+			if v == "" {
+				v = "1"
+			}
+			return "oven/bun:" + v + "-slim", nil
+		},
+		install: "bun install", frozen: "bun install --frozen-lockfile",
+		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
+		run: "bun run", start: "bun run start", runFile: "bun",
+	},
+}
+
+func (m nodeManager) caches() []string {
+	if m.cache == "" {
+		return nil
+	}
+	return []string{m.cache}
+}
+
+func nodeImage(n *Node) (string, error) {
+	v, err := pickVersion("node", n.Version, []string{"26", "24", "22"}, "24")
+	return "node:" + v + "-slim", err
 }
 
 func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error) {
 	n := f.Node
-	cmds, ok := nodeInstall[n.Manager]
+	m, ok := nodeManagers[n.Manager]
 	if !ok {
-		return Stage{}, fmt.Errorf("%s isn't supported yet; use npm or pnpm", n.Manager)
+		return Stage{}, fmt.Errorf("%s isn't supported yet; use npm, pnpm, yarn or bun", n.Manager)
 	}
-	image, err := nodeImage(f)
+	image, err := m.image(n)
 	if err != nil {
 		return Stage{}, err
 	}
 
 	var steps []Step
-	if n.Manager == "pnpm" {
-		v := n.ManagerVersion
-		if v == "" {
-			v = "latest"
-		}
-		steps = append(steps, Run{Cmd: "npm install -g pnpm@" + v, Caches: []string{"/root/.npm"}})
+	if m.setup != nil {
+		steps = append(steps, m.setup(n)...)
 	}
 	manifests := []string{"package.json"}
-	install := cmds.install
+	install := m.install
 	if n.Lockfile != "" {
 		manifests = append(manifests, n.Lockfile)
-		install = cmds.frozen
+		install = m.frozen
+	}
+	if f.Has(".yarnrc.yml") {
+		manifests = append(manifests, ".yarnrc.yml")
 	}
 	steps = append(steps,
 		Copy{Src: manifests, Dst: "./"},
-		Run{Cmd: install, Caches: []string{cmds.cache}},
+		Run{Cmd: install, Caches: m.caches()},
 		copySource(),
 	)
 	steps = append(steps, copyAssets(assets)...)
 	if n.Package.Scripts["build"] != "" {
-		steps = append(steps, Run{Cmd: n.Manager + " run build"})
+		steps = append(steps, Run{Cmd: m.run + " build"})
 	}
 	if prune {
-		steps = append(steps, Run{Cmd: cmds.prune, Caches: []string{cmds.cache}})
+		steps = append(steps, Run{Cmd: m.prune, Caches: m.caches()})
 	}
 	return Stage{Name: name, From: image, Steps: steps}, nil
 }
 
 func nodeStart(f *Facts) (Cmd, error) {
 	pkg := f.Node.Package
+	m := nodeManagers[f.Node.Manager]
 	if pkg.Scripts["start"] != "" {
-		return Cmd{"npm", "start"}, nil
+		return Cmd(strings.Fields(m.start)), nil
 	}
-	for _, file := range []string{pkg.Main, "server.js", "index.js"} {
+	for _, file := range []string{pkg.Main, "server.js", "index.js", "server.ts", "index.ts"} {
 		if file != "" && f.Has(file) {
-			return Cmd{"node", file}, nil
+			return Cmd{m.runFile, file}, nil
 		}
 	}
 	return nil, fmt.Errorf("no start command: add a \"start\" script to package.json, or a server.js")
@@ -94,10 +162,14 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if err != nil && f.ProcfileWeb == "" {
 		return nil, Runtime{}, err
 	}
+	env := []Env{{"NODE_ENV", "production"}}
+	if f.Node.PnP {
+		env = append(env, Env{"NODE_OPTIONS", "--require /app/.pnp.cjs"})
+	}
 	return []Stage{build}, Runtime{
 		From: build.From,
 		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
-		Env:  []Env{{"NODE_ENV", "production"}},
+		Env:  env,
 		Cmd:  start,
 	}, nil
 }
