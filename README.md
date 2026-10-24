@@ -70,9 +70,7 @@ wolkpack rejects unknown keys, so a typo fails the build.
 
 ## Acknowledgements
 
-wolkpack borrows its core ideas from [Nixpacks](https://github.com/railwayapp/nixpacks), [Railpack](https://github.com/railwayapp/railpack) and [Cloud Native Buildpacks](https://buildpacks.io). They showed that an app's own files say enough to build it, and that nobody should have to write a Dockerfile to ship a web app. wolkpack wouldn't exist without them.
-
-Thank you to everyone who builds and maintains those projects.
+wolkpack is inspired by [Nixpacks](https://github.com/railwayapp/nixpacks), [Railpack](https://github.com/railwayapp/railpack) and [Cloud Native Buildpacks](https://buildpacks.io). Thank you to their maintainers and contributors.
 
 ## License
 
