@@ -105,7 +105,11 @@ for name in "${names[@]}"; do
     continue
   fi
 
-  cid=$(docker run -d -p 127.0.0.1::8080 "$image")
+  run_args=()
+  if [ -f "e2e/testdata/$name/run-env" ]; then
+    while read -r kv; do run_args+=(-e "$kv"); done <"e2e/testdata/$name/run-env"
+  fi
+  cid=$(docker run -d "${run_args[@]}" -p 127.0.0.1::8080 "$image")
   port=$(docker port "$cid" 8080 | head -1 | cut -d: -f2)
   want=$(cat "e2e/testdata/$name/expect")
   path=$(cat "e2e/testdata/$name/path" 2>/dev/null || echo /)
