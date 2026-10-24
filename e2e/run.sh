@@ -45,10 +45,20 @@ for name in "${names[@]}"; do
     continue
   fi
   cid=$(docker create "$image")
-  leaked=$(docker export "$cid" | tar -t | grep -c HOST_MARKER)
+  files=$(docker export "$cid" | tar -t)
   docker rm "$cid" >/dev/null
-  if [ "$leaked" -gt 0 ]; then
+  if grep -q HOST_MARKER <<<"$files"; then
     record "$name" FAIL - - - "host node_modules or __pycache__ copied into the image"
+    continue
+  fi
+  shipped=""
+  if [ -f "e2e/testdata/$name/absent" ]; then
+    while read -r pkg; do
+      grep -qE "node_modules/(\.pnpm/)?$pkg[@/]" <<<"$files" && shipped="$shipped $pkg"
+    done <"e2e/testdata/$name/absent"
+  fi
+  if [ -n "$shipped" ]; then
+    record "$name" FAIL - - - "image ships packages it shouldn't:$shipped"
     continue
   fi
   provider=$(bin/wolkpack plan "$dir" | sed -n 's/^# wolkpack: //p')
