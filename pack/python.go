@@ -83,10 +83,17 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	switch py.Manager {
 	case "uv":
 		if ws := f.UvWorkspace; ws != nil {
-			// Every member's pyproject.toml feeds the sync, so the whole workspace goes in first.
+			// Dependencies install from the manifests alone; members need their source to build.
+			manifests := []string{"pyproject.toml", "uv.lock"}
+			for _, dir := range ws.Dirs {
+				manifests = append(manifests, dir+"/pyproject.toml")
+			}
+			sync := "uv sync --frozen --no-dev --package " + shellQuote([]string{py.Name})
 			steps = append(steps,
+				Copy{Src: manifests, Dst: "./", Parents: true},
+				Run{Cmd: sync + " --no-install-workspace", Caches: uvCache},
 				copySource(),
-				Run{Cmd: "uv sync --frozen --no-dev --package " + shellQuote([]string{py.Name}), Caches: uvCache},
+				Run{Cmd: sync, Caches: uvCache},
 			)
 		} else {
 			steps = append(steps,
