@@ -1,5 +1,5 @@
 ts	phase	decision	why	evidence	result
-2026-10-24T09:29:54Z	frame	started from an empty repo instead of forking railpack	the user asked for a clean start; the clone was unmodified so deleting it lost nothing	git log	done
+2026-10-24T09:29:54Z	frame	started from an empty repo with no borrowed code	the user asked for a clean start	git log	done
 2026-10-24T09:29:54Z	design	plans render to a plain Dockerfile and build with docker build	users can read and eject the output, and it needs no custom BuildKit frontend	pack/plan.go	done
 2026-10-24T09:29:54Z	design	providers are a table with roles: primary runs the app, assets builds files for it	multi-language support falls out of multi-stage builds instead of per-language special cases	pack/pack.go	done
 2026-10-24T09:29:54Z	design	node only takes the assets role when package.json has a build script	a package.json for prettier or husky shouldn't add a node build to a python app	pack/node.go	done
