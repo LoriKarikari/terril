@@ -16,7 +16,7 @@ jobs:
       - run: go vet ./...
       - run: test -z "$(gofmt -l .)"
       - run: e2e/run.sh
-      - if: always()
+      - if: failure()
         uses: actions/upload-artifact@v5
         with:
           name: e2e-results
