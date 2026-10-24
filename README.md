@@ -76,13 +76,13 @@ The build steps can read these variables, but the running app can't, and the val
 
 ## Monorepos
 
-Point wolkpack at one app in a JavaScript workspace:
+Point wolkpack at one app in a JavaScript or uv workspace:
 
 ```sh
 wolkpack build apps/web
 ```
 
-wolkpack finds the workspace root. It builds the workspace packages the app depends on, and then the app. It uses turbo or pnpm if the repo has them. The image contains only the app's production dependencies.
+wolkpack finds the workspace root. It builds the workspace packages the app depends on, and then the app. For JavaScript it uses turbo or pnpm if the repo has them. The image contains only the app's production dependencies.
 
 ## Config
 

@@ -40,9 +40,20 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Env{"UV_PYTHON_DOWNLOADS", "never"},
 			Env{"UV_LINK_MODE", "copy"},
 			Env{"UV_COMPILE_BYTECODE", "1"},
-			Copy{Src: []string{"pyproject.toml", "uv.lock"}, Dst: "./"},
-			Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: []string{"/root/.cache/uv"}},
 		)
+		if ws := f.UvWorkspace; ws != nil {
+			// Every member's pyproject.toml feeds the sync, so the whole workspace goes in first.
+			steps = append(steps,
+				copySource(),
+				Run{Cmd: "uv sync --frozen --no-dev --package " + shellQuote([]string{py.Name}), Caches: []string{"/root/.cache/uv"}},
+			)
+		} else {
+			steps = append(steps,
+				Copy{Src: []string{"pyproject.toml", "uv.lock"}, Dst: "./"},
+				Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: []string{"/root/.cache/uv"}},
+				copySource(),
+			)
+		}
 	case "pip":
 		steps = append(steps, Run{Cmd: "python -m venv " + venv})
 		pipCache := []string{"/root/.cache/pip"}
@@ -62,22 +73,32 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Run{Cmd: "poetry install --only main --no-root", Caches: []string{"/root/.cache/pypoetry"}},
 		)
 	}
-	steps = append(steps, copySource())
+	if py.Manager != "uv" {
+		steps = append(steps, copySource())
+	}
 	steps = append(steps, copyAssets(assets)...)
 	if djangoCollectsStatic(f) {
-		steps = append(steps, Run{Cmd: "python manage.py collectstatic --noinput"})
+		cmd := "python manage.py collectstatic --noinput"
+		if ws := f.UvWorkspace; ws != nil {
+			cmd = "cd " + shellQuote([]string{ws.App}) + " && " + cmd
+		}
+		steps = append(steps, Run{Cmd: cmd})
 	}
 
 	start, err := pythonStart(f)
 	if err != nil && f.Start == "" {
 		return nil, Runtime{}, err
 	}
-	return []Stage{{Name: "build", From: image, Steps: steps}}, Runtime{
+	rt := Runtime{
 		From:   image,
-		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "./"}},
+		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
 		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
 		Cmd:    start,
-	}, nil
+	}
+	if ws := f.UvWorkspace; ws != nil {
+		rt.Workdir = "/app/" + ws.App
+	}
+	return []Stage{{Name: "build", From: image, Steps: steps}}, rt, nil
 }
 
 var pythonFrameworks = []struct {

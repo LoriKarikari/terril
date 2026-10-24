@@ -19,11 +19,13 @@ import (
 type Facts struct {
 	Dir       string
 	Workspace *Workspace
-	Node      *Node
-	Python    *Python
-	Go        *modfile.File
-	GoCgo     bool
-	Config    Config
+	// A uv workspace the Python app belongs to. Root is the build context.
+	UvWorkspace *Workspace
+	Node        *Node
+	Python      *Python
+	Go          *modfile.File
+	GoCgo       bool
+	Config      Config
 	// From wolkpack.toml, else the Procfile web: line.
 	Start string
 }
@@ -70,6 +72,7 @@ type PackageJSON struct {
 }
 
 type Python struct {
+	Name         string
 	Manager      string
 	Requirements []string
 	Deps         map[string]bool
@@ -128,6 +131,23 @@ func Read(dir string) (*Facts, error) {
 	}
 	if f.Python, err = readPython(f); err != nil {
 		return nil, err
+	}
+	if f.Python != nil && f.Workspace == nil {
+		if f.UvWorkspace, err = findUvWorkspace(dir); err != nil {
+			return nil, err
+		}
+	}
+	if ws := f.UvWorkspace; ws != nil {
+		if !fileExists(filepath.Join(ws.Root, "uv.lock")) {
+			return nil, fmt.Errorf("the uv workspace at %s has no uv.lock; run uv lock there", ws.Root)
+		}
+		if f.Python.Name == "" {
+			return nil, fmt.Errorf("%s/pyproject.toml has no project name, which uv needs to select it", ws.App)
+		}
+		f.Python.Manager = "uv"
+		if f.Python.Version == "" {
+			f.Python.Version = (&Facts{Dir: ws.Root}).firstLine(".python-version")
+		}
 	}
 	if s, ok := f.read("go.mod"); ok {
 		if f.Go, err = modfile.Parse("go.mod", []byte(s), nil); err != nil {
@@ -289,6 +309,40 @@ func readMembers(root string, patterns []string) (map[string]Member, error) {
 	return members, err
 }
 
+// findUvWorkspace walks up from an app to the uv workspace that lists it, stopping at the repo root.
+func findUvWorkspace(dir string) (*Workspace, error) {
+	app, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	for parent := filepath.Dir(app); ; parent = filepath.Dir(parent) {
+		if b, err := os.ReadFile(filepath.Join(parent, "pyproject.toml")); err == nil {
+			var doc struct {
+				Tool struct {
+					Uv struct {
+						Workspace struct {
+							Members []string `toml:"members"`
+							Exclude []string `toml:"exclude"`
+						} `toml:"workspace"`
+					} `toml:"uv"`
+				} `toml:"tool"`
+			}
+			if _, err := toml.Decode(string(b), &doc); err != nil {
+				return nil, fmt.Errorf("%s: %w", filepath.Join(parent, "pyproject.toml"), err)
+			}
+			ws := doc.Tool.Uv.Workspace
+			rel, _ := filepath.Rel(parent, app)
+			rel = filepath.ToSlash(rel)
+			if inWorkspace(ws.Members, rel) && !inWorkspace(ws.Exclude, rel) {
+				return &Workspace{Root: parent, App: rel}, nil
+			}
+		}
+		if fileExists(filepath.Join(parent, ".git")) || parent == filepath.Dir(parent) {
+			return nil, nil
+		}
+	}
+}
+
 func workspacePatterns(dir string) ([]string, error) {
 	if b, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml")); err == nil {
 		var ws struct {
@@ -377,6 +431,7 @@ func readPython(f *Facts) (*Python, error) {
 		found = true
 		var doc struct {
 			Project struct {
+				Name           string   `toml:"name"`
 				Dependencies   []string `toml:"dependencies"`
 				RequiresPython string   `toml:"requires-python"`
 			} `toml:"project"`
@@ -389,6 +444,7 @@ func readPython(f *Facts) (*Python, error) {
 		if _, err := toml.Decode(s, &doc); err != nil {
 			return nil, fmt.Errorf("pyproject.toml: %w", err)
 		}
+		py.Name = doc.Project.Name
 		py.Requirements = doc.Project.Dependencies
 		for _, spec := range doc.Project.Dependencies {
 			py.Deps[distName(spec)] = true
