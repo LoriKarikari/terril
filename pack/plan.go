@@ -9,7 +9,7 @@ import (
 // Fixed so volume permissions are predictable.
 const appUser = "1000:1000"
 
-var sourceExcludes = []string{".git", "node_modules", ".venv", "__pycache__"}
+var sourceExcludes = []string{"**/.git", "**/node_modules", "**/.venv", "**/__pycache__"}
 
 type Plan struct {
 	Provider string
