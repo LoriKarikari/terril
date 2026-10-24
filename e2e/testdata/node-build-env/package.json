@@ -1,0 +1,1 @@
+{ "name": "build-env", "scripts": { "build": "node build.js", "start": "node dist/server.js" } }
