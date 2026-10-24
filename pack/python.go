@@ -2,6 +2,7 @@ package pack
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -33,7 +34,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	switch py.Manager {
 	case "uv":
 		steps = append(steps,
-			Copy{From: "ghcr.io/astral-sh/uv:latest", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
+			Copy{From: "ghcr.io/astral-sh/uv:0.13.5", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
 			Env{"UV_PROJECT_ENVIRONMENT", venv},
 			// The venv links to this image's python, which the runtime image also has.
 			Env{"UV_PYTHON_DOWNLOADS", "never"},
@@ -57,6 +58,9 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	steps = append(steps, copySource())
 	steps = append(steps, copyAssets(assets)...)
+	if djangoCollectsStatic(f) {
+		steps = append(steps, Run{Cmd: "python manage.py collectstatic --noinput"})
+	}
 
 	start, err := pythonStart(f)
 	if err != nil && f.ProcfileWeb == "" {
@@ -70,28 +74,78 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}, nil
 }
 
-var fastapiAppRe = regexp.MustCompile(`(?m)^(\w+)\s*=\s*FastAPI\(`)
+var pythonFrameworks = []struct {
+	name, dep, server, cmd string
+	module                 func(f *Facts) string
+}{
+	{"Django", "django", "gunicorn", "gunicorn %s --bind 0.0.0.0:$PORT", djangoWSGI},
+	{"FastAPI", "fastapi", "uvicorn", "uvicorn %s --host 0.0.0.0 --port $PORT", appVariable("FastAPI")},
+	{"Flask", "flask", "gunicorn", "gunicorn %s --bind 0.0.0.0:$PORT", appVariable("Flask")},
+}
+
+var pythonEntries = []string{"main.py", "app.py", "wsgi.py"}
 
 func pythonStart(f *Facts) (Cmd, error) {
-	entries := []string{"main.py", "app.py"}
-	if f.Python.Deps["fastapi"] {
-		if !f.Python.Deps["uvicorn"] {
-			return nil, fmt.Errorf("this is a FastAPI app but uvicorn isn't in its dependencies; add uvicorn")
+	for _, fw := range pythonFrameworks {
+		if !f.Python.Deps[fw.dep] {
+			continue
 		}
-		for _, file := range entries {
-			src, _ := f.read(file)
-			if m := fastapiAppRe.FindStringSubmatch(src); m != nil {
-				module := strings.TrimSuffix(file, ".py") + ":" + m[1]
-				return Cmd{"sh", "-c", "exec uvicorn " + module + " --host 0.0.0.0 --port $PORT"}, nil
-			}
+		module := fw.module(f)
+		if module == "" {
+			continue
 		}
+		if !f.Python.Deps[fw.server] {
+			return nil, fmt.Errorf("this is a %s app but %s isn't in its dependencies; add %s", fw.name, fw.server, fw.server)
+		}
+		return Cmd{"sh", "-c", "exec " + fmt.Sprintf(fw.cmd, module)}, nil
 	}
-	for _, file := range entries {
+	for _, file := range pythonEntries {
 		if f.Has(file) {
 			return Cmd{"python", file}, nil
 		}
 	}
 	return nil, fmt.Errorf("no start command: add a main.py, or a Procfile with a web: line")
+}
+
+func appVariable(constructor string) func(*Facts) string {
+	re := regexp.MustCompile(`(?m)^(\w+)\s*=\s*` + constructor + `\(`)
+	return func(f *Facts) string {
+		for _, file := range pythonEntries {
+			src, _ := f.read(file)
+			if m := re.FindStringSubmatch(src); m != nil {
+				return strings.TrimSuffix(file, ".py") + ":" + m[1]
+			}
+		}
+		return ""
+	}
+}
+
+var djangoSettingsRe = regexp.MustCompile(`DJANGO_SETTINGS_MODULE["']\s*,\s*["']([\w.]+)\.settings["']`)
+var staticRootRe = regexp.MustCompile(`(?m)^STATIC_ROOT\s*=`)
+
+func djangoProject(f *Facts) string {
+	src, _ := f.read("manage.py")
+	if m := djangoSettingsRe.FindStringSubmatch(src); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func djangoWSGI(f *Facts) string {
+	if p := djangoProject(f); p != "" {
+		return p + ".wsgi"
+	}
+	return ""
+}
+
+// collectstatic exits with an error when STATIC_ROOT is unset.
+func djangoCollectsStatic(f *Facts) bool {
+	p := djangoProject(f)
+	if p == "" || !f.Python.Deps["django"] {
+		return false
+	}
+	settings, _ := f.read(filepath.Join(strings.ReplaceAll(p, ".", "/"), "settings.py"))
+	return staticRootRe.MatchString(settings)
 }
 
 func shellQuote(args []string) string {
