@@ -266,25 +266,33 @@ func nodeStart(f *Facts) (Cmd, error) {
 }
 
 // Distroless has no shell or npm, so it only runs a start command that is a plain node call.
-func distrolessNode(f *Facts) (string, []Env, Cmd, bool) {
+// Distroless has no shell or npm, so the start script must be one node call, or one call to a
+// package bin that package-lock.json maps to a file. check verifies that file is a Node script.
+func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok bool) {
 	v, _ := nodeVersion(f.Node)
 	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
-		return "", nil, nil, false
+		return "", nil, nil, nil, false
 	}
 	start, err := nodeStart(f)
 	if err != nil {
-		return "", nil, nil, false
+		return "", nil, nil, nil, false
 	}
-	var env []Env
 	if script := f.Node.Package.Scripts["start"]; script != "" {
 		var args []string
-		var ok bool
-		if env, args, ok = directCommand(script); !ok || args[0] != "node" || len(args) < 2 {
-			return "", nil, nil, false
+		if env, args, ok = directCommand(script); !ok {
+			return "", nil, nil, nil, false
+		}
+		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
+			args = append([]string{"node", bin}, args[1:]...)
+			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote([]string{bin}) + ")\" in '#!'*node*) ;; *) " +
+				"echo " + shellQuote([]string{"wolkpack: " + bin + " isn't a Node script, so it can't run on distroless; set start in wolkpack.toml"}) + " >&2; exit 1;; esac"}
+		}
+		if args[0] != "node" || len(args) < 2 {
+			return "", nil, nil, nil, false
 		}
 		start = Cmd(args)
 	}
-	return "gcr.io/distroless/nodejs" + v + "-debian13", env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), true
+	return "gcr.io/distroless/nodejs" + v + "-debian13", env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), check, true
 }
 
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -334,8 +342,11 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Env:    env,
 		Cmd:    start,
 	}
-	if image, startEnv, cmd, ok := distrolessNode(f); ok {
+	if image, startEnv, cmd, check, ok := distrolessNode(f); ok {
 		rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
+		if check != nil {
+			build.Steps = append(build.Steps, *check)
+		}
 	}
 	if f.Node.Manager == "bun" {
 		if image, startEnv, cmd, ok := distrolessBun(f); ok {

@@ -57,6 +57,8 @@ type Node struct {
 	Lockfile       string
 	Version        string
 	PnP            bool
+	// Production bin names from package-lock.json, mapped to their file under node_modules.
+	Bins map[string]string
 }
 
 type PackageJSON struct {
@@ -185,6 +187,7 @@ func readNode(f *Facts) (*Node, error) {
 		return nil, nil
 	}
 	n := &Node{}
+	var err error
 	if err := json.Unmarshal([]byte(s), &n.Package); err != nil {
 		return nil, fmt.Errorf("package.json: %w", err)
 	}
@@ -214,6 +217,12 @@ func readNode(f *Facts) (*Node, error) {
 	}
 	if n.Manager == "" {
 		n.Manager = "npm"
+	}
+	if n.Lockfile == "package-lock.json" && f.Workspace == nil {
+		lock, _ := f.read("package-lock.json")
+		if n.Bins, err = lockBins(lock); err != nil {
+			return nil, err
+		}
 	}
 	if n.Manager == "yarn" {
 		lock, _ := f.rootRead("yarn.lock")
@@ -414,6 +423,29 @@ func goUsesCgo(f *Facts) (bool, error) {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func lockBins(lock string) (map[string]string, error) {
+	var doc struct {
+		Packages map[string]struct {
+			Bin map[string]string `json:"bin"`
+			Dev bool              `json:"dev"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(lock), &doc); err != nil {
+		return nil, fmt.Errorf("package-lock.json: %w", err)
+	}
+	bins := map[string]string{}
+	for key, pkg := range doc.Packages {
+		dir, top := strings.CutPrefix(key, "node_modules/")
+		if !top || pkg.Dev || strings.Contains(dir, "/node_modules/") {
+			continue
+		}
+		for name, file := range pkg.Bin {
+			bins[name] = path.Join(key, file)
+		}
+	}
+	return bins, nil
 }
 
 var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
