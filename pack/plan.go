@@ -6,17 +6,23 @@ import (
 	"strings"
 )
 
-// The UID every runtime image runs as. Fixed so volume permissions are predictable.
+// Fixed so volume permissions are predictable.
 const appUser = "1000:1000"
 
-// sourceExcludes keeps host-built artifacts out of the image, even without a .dockerignore.
 var sourceExcludes = []string{".git", "node_modules", ".venv", "__pycache__"}
 
 type Plan struct {
 	Provider string
 	Assets   []string
-	// Build stages in order. The last stage is the runtime image.
-	Stages []Stage
+	Stages   []Stage
+	Runtime  Runtime
+}
+
+type Runtime struct {
+	From string
+	Copy Copy
+	Env  []Env
+	Cmd  Cmd
 }
 
 type Stage struct {
@@ -80,10 +86,8 @@ func (c Cmd) dockerfile() string {
 	return "CMD " + string(j)
 }
 
-// copySource copies the app directory in, minus host-built artifacts.
 func copySource() Copy { return Copy{Src: []string{"."}, Dst: "./", Exclude: sourceExcludes} }
 
-// copyAssets overlays each asset stage's built files onto the current stage.
 func copyAssets(stages []string) []Step {
 	var steps []Step
 	for _, s := range stages {
@@ -92,22 +96,21 @@ func copyAssets(stages []string) []Step {
 	return steps
 }
 
-// runtime is the final stage: non-root, PORT set, start command.
-func runtime(from string, copy Copy, env []Env, cmd Cmd) Stage {
-	copy.Chown = true
+func (r Runtime) stage() Stage {
+	r.Copy.Chown = true
 	steps := []Step{Env{"PORT", "8080"}}
-	for _, e := range env {
+	for _, e := range r.Env {
 		steps = append(steps, e)
 	}
-	steps = append(steps, copy, User(appUser), cmd)
-	return Stage{Name: "runtime", From: from, Steps: steps}
+	steps = append(steps, r.Copy, User(appUser), r.Cmd)
+	return Stage{Name: "runtime", From: r.From, Steps: steps}
 }
 
 func (p *Plan) Dockerfile() string {
 	var b strings.Builder
 	b.WriteString("# syntax=docker/dockerfile:1\n")
 	fmt.Fprintf(&b, "# wolkpack: %s\n", p.Summary())
-	for _, s := range p.Stages {
+	for _, s := range append(p.Stages, p.Runtime.stage()) {
 		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR /app\n", s.From, s.Name)
 		for _, step := range s.Steps {
 			b.WriteString(step.dockerfile() + "\n")

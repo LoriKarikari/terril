@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Builds every example with wolkpack, runs it, and checks the HTTP response.
-# Writes e2e/results.tsv. Exits non-zero if any example fails.
-# Usage: e2e/run.sh [example-name...]
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

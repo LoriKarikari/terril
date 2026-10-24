@@ -17,7 +17,7 @@ var goProvider = provider{
 	plan: planGo,
 }
 
-func planGo(f *Facts, assets []string) ([]Stage, error) {
+func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	version := "1.25"
 	if f.Go.Toolchain != nil {
 		version = strings.TrimPrefix(f.Go.Toolchain.Name, "go")
@@ -26,7 +26,7 @@ func planGo(f *Facts, assets []string) ([]Stage, error) {
 	}
 	pkg, err := goMainPackage(f)
 	if err != nil {
-		return nil, err
+		return nil, Runtime{}, err
 	}
 
 	mods := []string{"go.mod"}
@@ -44,11 +44,14 @@ func planGo(f *Facts, assets []string) ([]Stage, error) {
 
 	// A static binary needs no OS. A Procfile command needs a shell.
 	base := "gcr.io/distroless/static-debian12"
-	if f.Web != "" {
+	if f.ProcfileWeb != "" {
 		base = "debian:bookworm-slim"
 	}
-	rt := runtime(base, Copy{From: "build", Src: []string{"/out/app"}, Dst: "/app/app"}, nil, Cmd{"/app/app"})
-	return []Stage{{Name: "build", From: "golang:" + version, Steps: steps}, rt}, nil
+	return []Stage{{Name: "build", From: "golang:" + version, Steps: steps}}, Runtime{
+		From: base,
+		Copy: Copy{From: "build", Src: []string{"/out/app"}, Dst: "/app/app"},
+		Cmd:  Cmd{"/app/app"},
+	}, nil
 }
 
 func goMainPackage(f *Facts) (string, error) {

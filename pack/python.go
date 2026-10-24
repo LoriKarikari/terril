@@ -21,11 +21,11 @@ const venv = "/app/.venv"
 
 var venvPath = Env{"PATH", venv + "/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
 
-func planPython(f *Facts, assets []string) ([]Stage, error) {
+func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	py := f.Python
 	v, err := pickVersion("python", py.Version, []string{"3.14", "3.13", "3.12", "3.11"}, "3.13")
 	if err != nil {
-		return nil, err
+		return nil, Runtime{}, err
 	}
 	image := "python:" + v + "-slim"
 
@@ -53,20 +53,21 @@ func planPython(f *Facts, assets []string) ([]Stage, error) {
 			steps = append(steps, Run{Cmd: "pip install " + shellQuote(py.Requirements), Caches: pipCache})
 		}
 	default:
-		return nil, fmt.Errorf("%s isn't supported yet; use pip or uv", py.Manager)
+		return nil, Runtime{}, fmt.Errorf("%s isn't supported yet; use pip or uv", py.Manager)
 	}
 	steps = append(steps, copySource())
 	steps = append(steps, copyAssets(assets)...)
 
 	start, err := pythonStart(f)
-	if err != nil && f.Web == "" {
-		return nil, err
+	if err != nil && f.ProcfileWeb == "" {
+		return nil, Runtime{}, err
 	}
-	rt := runtime(image,
-		Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
-		[]Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
-		start)
-	return []Stage{{Name: "build", From: image, Steps: steps}, rt}, nil
+	return []Stage{{Name: "build", From: image, Steps: steps}}, Runtime{
+		From: image,
+		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
+		Env:  []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
+		Cmd:  start,
+	}, nil
 }
 
 var fastapiAppRe = regexp.MustCompile(`(?m)^(\w+)\s*=\s*FastAPI\(`)

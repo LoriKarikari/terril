@@ -10,9 +10,7 @@ import (
 
 var exactVersionRe = regexp.MustCompile(`^\d+(\.\d+){0,2}$`)
 
-// pickVersion turns what the app asked for into an image tag.
-// An exact version is used as-is. A range resolves to the default if it fits,
-// otherwise to the newest supported version that fits.
+// A range resolves to the default if it fits, otherwise to the newest supported version that fits.
 func pickVersion(tool, want string, supported []string, def string) (string, error) {
 	want = strings.TrimSpace(want)
 	if want == "" {

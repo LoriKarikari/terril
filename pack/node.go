@@ -85,18 +85,19 @@ func nodeStart(f *Facts) (Cmd, error) {
 	return nil, fmt.Errorf("no start command: add a \"start\" script to package.json, or a server.js")
 }
 
-func planNode(f *Facts, assets []string) ([]Stage, error) {
+func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	build, err := nodeBuild(f, "build", assets, true)
 	if err != nil {
-		return nil, err
+		return nil, Runtime{}, err
 	}
 	start, err := nodeStart(f)
-	if err != nil && f.Web == "" {
-		return nil, err
+	if err != nil && f.ProcfileWeb == "" {
+		return nil, Runtime{}, err
 	}
-	rt := runtime(build.From,
-		Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
-		[]Env{{"NODE_ENV", "production"}},
-		start)
-	return []Stage{build, rt}, nil
+	return []Stage{build}, Runtime{
+		From: build.From,
+		Copy: Copy{From: "build", Src: []string{"/app/"}, Dst: "./"},
+		Env:  []Env{{"NODE_ENV", "production"}},
+		Cmd:  start,
+	}, nil
 }

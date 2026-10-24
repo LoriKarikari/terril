@@ -13,19 +13,17 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// Facts is everything wolkpack knows about an app, parsed once from its manifests.
 type Facts struct {
 	Dir    string
 	Node   *Node
 	Python *Python
 	Go     *modfile.File
-	// The `web:` command from a Procfile, if any.
-	Web string
+
+	ProcfileWeb string
 }
 
 type Node struct {
-	Package PackageJSON
-	// npm, pnpm, yarn or bun.
+	Package        PackageJSON
 	Manager        string
 	ManagerVersion string
 	Lockfile       string
@@ -42,13 +40,10 @@ type PackageJSON struct {
 }
 
 type Python struct {
-	// pip, uv or poetry.
-	Manager string
-	// Requirement specs from pyproject.toml. Empty when requirements.txt drives the install.
+	Manager      string
 	Requirements []string
-	// Normalized distribution names (PEP 503), so "Django_Rest" and "django-rest" match.
-	Deps    map[string]bool
-	Version string
+	Deps         map[string]bool
+	Version      string
 }
 
 func (f *Facts) Has(name string) bool {
@@ -61,7 +56,6 @@ func (f *Facts) read(name string) (string, bool) {
 	return string(b), err == nil
 }
 
-// firstLine returns the trimmed first line of the first file that exists.
 func (f *Facts) firstLine(names ...string) string {
 	for _, n := range names {
 		if s, ok := f.read(n); ok {
@@ -89,7 +83,7 @@ func Read(dir string) (*Facts, error) {
 		}
 	}
 	if s, ok := f.read("Procfile"); ok {
-		f.Web = procfileWeb(s)
+		f.ProcfileWeb = procfileWeb(s)
 	}
 	return f, nil
 }
@@ -162,9 +156,7 @@ func readPython(f *Facts) (*Python, error) {
 		if _, err := toml.Decode(s, &doc); err != nil {
 			return nil, fmt.Errorf("pyproject.toml: %w", err)
 		}
-		if !f.Has("requirements.txt") {
-			py.Requirements = doc.Project.Dependencies
-		}
+		py.Requirements = doc.Project.Dependencies
 		for _, spec := range doc.Project.Dependencies {
 			py.Deps[distName(spec)] = true
 		}
@@ -191,7 +183,7 @@ func readPython(f *Facts) (*Python, error) {
 var distNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*`)
 var normalizeRe = regexp.MustCompile(`[-_.]+`)
 
-// distName extracts and normalizes the distribution name from a PEP 508 spec.
+// PEP 503 normalization, so "Django_Rest" matches "django-rest".
 func distName(spec string) string {
 	return strings.ToLower(normalizeRe.ReplaceAllString(distNameRe.FindString(strings.TrimSpace(spec)), "-"))
 }
@@ -202,7 +194,6 @@ func requirementNames(s string) []string {
 	for sc.Scan() {
 		line, _, _ := strings.Cut(sc.Text(), "#")
 		line = strings.TrimSpace(line)
-		// Options like -r, -e and --index-url name no distribution.
 		if line == "" || strings.HasPrefix(line, "-") {
 			continue
 		}

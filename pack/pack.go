@@ -9,37 +9,31 @@ import (
 type Role uint8
 
 const (
-	// Primary owns the runtime image and the start command.
 	Primary Role = 1 << iota
-	// Assets builds files that get copied into the primary's build before it runs.
 	Assets
 )
 
 type provider struct {
-	name   string
-	detect func(*Facts) Role
-	// plan builds the full image. assets names the asset stages to overlay.
-	plan func(f *Facts, assets []string) ([]Stage, error)
-	// assetStage builds the asset stage. Only set for providers that can fill the Assets role.
+	name       string
+	detect     func(*Facts) Role
+	plan       func(f *Facts, assetStages []string) ([]Stage, Runtime, error)
 	assetStage func(f *Facts, name string) (Stage, error)
 }
 
 var providers = []provider{goProvider, pythonProvider, nodeProvider}
 
-// New plans an app. force names the primary provider and skips primary detection.
-func New(f *Facts, force string) (*Plan, error) {
+func New(f *Facts, forceProvider string) (*Plan, error) {
 	roles := map[string]Role{}
 	for _, p := range providers {
 		roles[p.name] = p.detect(f)
 	}
 
-	primary, err := pickPrimary(roles, force)
+	primary, err := pickPrimary(roles, forceProvider)
 	if err != nil {
 		return nil, err
 	}
 
 	plan := &Plan{Provider: primary.name}
-	var assetStages, stages []Stage
 	var assetNames []string
 	for _, p := range providers {
 		if p.name == primary.name || roles[p.name]&Assets == 0 {
@@ -51,18 +45,18 @@ func New(f *Facts, force string) (*Plan, error) {
 			return nil, err
 		}
 		plan.Assets = append(plan.Assets, p.name)
-		assetStages = append(assetStages, s)
+		plan.Stages = append(plan.Stages, s)
 		assetNames = append(assetNames, name)
 	}
 
-	if stages, err = primary.plan(f, assetNames); err != nil {
+	stages, rt, err := primary.plan(f, assetNames)
+	if err != nil {
 		return nil, err
 	}
-	plan.Stages = append(assetStages, stages...)
-
-	if f.Web != "" {
-		rt := &plan.Stages[len(plan.Stages)-1]
-		rt.Steps[len(rt.Steps)-1] = Cmd{"sh", "-c", f.Web}
+	plan.Stages = append(plan.Stages, stages...)
+	plan.Runtime = rt
+	if f.ProcfileWeb != "" {
+		plan.Runtime.Cmd = Cmd{"sh", "-c", f.ProcfileWeb}
 	}
 	return plan, nil
 }
@@ -83,8 +77,7 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 			candidates = append(candidates, p)
 		}
 	}
-	// A provider that can also build assets steps back for one that can only be primary.
-	// That's how a Python app with a package.json gets Python as the runtime.
+	// So a Python app with a package.json runs as Python, with Node building its assets.
 	if slices.ContainsFunc(candidates, func(p provider) bool { return roles[p.name]&Assets == 0 }) {
 		candidates = slices.DeleteFunc(candidates, func(p provider) bool { return roles[p.name]&Assets != 0 })
 	}
