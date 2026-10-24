@@ -18,12 +18,13 @@ names=("$@")
 
 for name in "${names[@]}"; do
   dir=e2e/testdata/$name
+  [ -f "$dir/app" ] && dir=$dir/$(cat "$dir/app")
   image=wolkpack-e2e-$name
   log=e2e/logs/$name.log
   mkdir -p e2e/logs
 
   if [ -f "$dir/expect-error" ]; then
-    want=$(cat "$dir/expect-error")
+    want=$(cat "e2e/testdata/$name/expect-error")
     if bin/wolkpack build -t "$image" "$dir" >"$log" 2>&1; then
       record "$name" FAIL - - - "build succeeded but should have failed"
     elif grep -qF "$want" "$log"; then
@@ -34,8 +35,20 @@ for name in "${names[@]}"; do
     continue
   fi
 
-  if ! bin/wolkpack build -t "$image" "$dir" >"$log" 2>&1; then
+  mkdir -p "$dir/host-artifacts/node_modules" "$dir/host-artifacts/__pycache__"
+  touch "$dir/host-artifacts/node_modules/HOST_MARKER" "$dir/host-artifacts/__pycache__/HOST_MARKER"
+  bin/wolkpack build -t "$image" "$dir" >"$log" 2>&1
+  status=$?
+  rm -rf "$dir/host-artifacts"
+  if [ $status -ne 0 ]; then
     record "$name" FAIL - - - "build failed, see $log"
+    continue
+  fi
+  cid=$(docker create "$image")
+  leaked=$(docker export "$cid" | tar -t | grep -c HOST_MARKER)
+  docker rm "$cid" >/dev/null
+  if [ "$leaked" -gt 0 ]; then
+    record "$name" FAIL - - - "host node_modules or __pycache__ copied into the image"
     continue
   fi
   provider=$(bin/wolkpack plan "$dir" | sed -n 's/^# wolkpack: //p')
@@ -48,7 +61,7 @@ for name in "${names[@]}"; do
 
   cid=$(docker run -d -p 127.0.0.1::8080 "$image")
   port=$(docker port "$cid" 8080 | head -1 | cut -d: -f2)
-  want=$(cat "$dir/expect")
+  want=$(cat "e2e/testdata/$name/expect")
   body=""
   for _ in $(seq 1 30); do
     body=$(curl -fsS "http://127.0.0.1:$port/" 2>/dev/null) && [[ "$body" == *"$want"* ]] && break

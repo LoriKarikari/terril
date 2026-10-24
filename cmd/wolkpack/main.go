@@ -59,7 +59,7 @@ func run(cmd, dir, provider, tag string) error {
 		tag = strings.ToLower(filepath.Base(abs))
 	}
 	fmt.Fprintf(os.Stderr, "wolkpack: building %s as %s\n", plan.Summary(), tag)
-	docker := exec.Command("docker", "build", "-t", tag, "-f", "-", dir)
+	docker := exec.Command("docker", "build", "-t", tag, "-f", "-", plan.Context)
 	docker.Stdin = strings.NewReader(dockerfile)
 	docker.Stdout, docker.Stderr = os.Stdout, os.Stderr
 	return docker.Run()

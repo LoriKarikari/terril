@@ -9,9 +9,11 @@ import (
 // Fixed so volume permissions are predictable.
 const appUser = "1000:1000"
 
-var sourceExcludes = []string{".git", "node_modules", ".venv", "__pycache__"}
+var sourceExcludes = []string{"**/.git", "**/node_modules", "**/.venv", "**/__pycache__"}
 
 type Plan struct {
+	// The directory docker builds from.
+	Context  string
 	Provider string
 	Assets   []string
 	Stages   []Stage
@@ -19,6 +21,7 @@ type Plan struct {
 }
 
 type Runtime struct {
+	Workdir  string
 	From     string
 	Packages []string
 	Copy     Copy
@@ -27,9 +30,10 @@ type Runtime struct {
 }
 
 type Stage struct {
-	Name  string
-	From  string
-	Steps []Step
+	Name    string
+	Workdir string
+	From    string
+	Steps   []Step
 }
 
 type Step interface{ dockerfile() string }
@@ -112,7 +116,7 @@ func (r Runtime) stage() Stage {
 		steps = append(steps, e)
 	}
 	steps = append(steps, r.Copy, User(appUser), ClearEntrypoint{}, r.Cmd)
-	return Stage{Name: "runtime", From: r.From, Steps: steps}
+	return Stage{Name: "runtime", From: r.From, Workdir: r.Workdir, Steps: steps}
 }
 
 func aptInstall(packages []string) Run {
@@ -125,7 +129,11 @@ func (p *Plan) Dockerfile() string {
 	b.WriteString("# syntax=docker/dockerfile:1\n")
 	fmt.Fprintf(&b, "# wolkpack: %s\n", p.Summary())
 	for _, s := range append(p.Stages, p.Runtime.stage()) {
-		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR /app\n", s.From, s.Name)
+		workdir := "/app"
+		if s.Workdir != "" {
+			workdir = s.Workdir
+		}
+		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR %s\n", s.From, s.Name, workdir)
 		for _, step := range s.Steps {
 			b.WriteString(step.dockerfile() + "\n")
 		}

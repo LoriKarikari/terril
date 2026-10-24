@@ -36,7 +36,13 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 		return nil, err
 	}
 
-	plan := &Plan{Provider: primary.name}
+	plan := &Plan{Provider: primary.name, Context: f.Dir}
+	if f.Workspace != nil {
+		if primary.name != "node" {
+			return nil, fmt.Errorf("%s is in the JS workspace at %s, but builds as %s; workspaces only support node apps", f.Dir, f.Workspace.Root, primary.name)
+		}
+		plan.Context = f.Workspace.Root
+	}
 	var assetNames []string
 	for _, p := range providers {
 		if p.name == primary.name || roles[p.name]&Assets == 0 {

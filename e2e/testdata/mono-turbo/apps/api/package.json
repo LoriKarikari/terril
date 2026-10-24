@@ -1,0 +1,1 @@
+{ "name": "@mono/api", "scripts": { "build": "node build.js", "start": "node dist/server.js" }, "dependencies": { "@mono/greeting": "*" } }

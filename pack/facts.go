@@ -5,22 +5,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 	"golang.org/x/mod/modfile"
+	"gopkg.in/yaml.v3"
 )
 
 type Facts struct {
-	Dir    string
-	Node   *Node
-	Python *Python
-	Go     *modfile.File
-	Config Config
+	Dir       string
+	Workspace *Workspace
+	Node      *Node
+	Python    *Python
+	Go        *modfile.File
+	Config    Config
 	// From wolkpack.toml, else the Procfile web: line.
 	Start string
+}
+
+// A JS workspace the app belongs to. Root is the build context.
+type Workspace struct {
+	Root string
+	App  string
 }
 
 type Config struct {
@@ -40,6 +49,7 @@ type Node struct {
 }
 
 type PackageJSON struct {
+	Name           string            `json:"name"`
 	Main           string            `json:"main"`
 	Scripts        map[string]string `json:"scripts"`
 	PackageManager string            `json:"packageManager"`
@@ -65,6 +75,23 @@ func (f *Facts) read(name string) (string, bool) {
 	return string(b), err == nil
 }
 
+func (f *Facts) root() string {
+	if f.Workspace != nil {
+		return f.Workspace.Root
+	}
+	return f.Dir
+}
+
+func (f *Facts) rootHas(name string) bool {
+	_, err := os.Stat(filepath.Join(f.root(), name))
+	return err == nil
+}
+
+func (f *Facts) rootRead(name string) (string, bool) {
+	b, err := os.ReadFile(filepath.Join(f.root(), name))
+	return string(b), err == nil
+}
+
 func (f *Facts) firstLine(names ...string) string {
 	for _, n := range names {
 		if s, ok := f.read(n); ok {
@@ -80,6 +107,11 @@ func Read(dir string) (*Facts, error) {
 	}
 	f := &Facts{Dir: dir}
 	var err error
+	if f.Has("package.json") {
+		if f.Workspace, err = findWorkspace(dir); err != nil {
+			return nil, err
+		}
+	}
 	if f.Node, err = readNode(f); err != nil {
 		return nil, err
 	}
@@ -123,13 +155,21 @@ func readNode(f *Facts) (*Node, error) {
 		return nil, fmt.Errorf("package.json: %w", err)
 	}
 	for _, l := range nodeLockfiles {
-		if f.Has(l.file) {
+		if f.rootHas(l.file) {
 			n.Manager, n.Lockfile = l.manager, l.file
 			break
 		}
 	}
+	pm := n.Package.PackageManager
+	if rootPkg, ok := f.rootRead("package.json"); ok && pm == "" && f.Workspace != nil {
+		var root PackageJSON
+		if err := json.Unmarshal([]byte(rootPkg), &root); err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), "package.json"), err)
+		}
+		pm = root.PackageManager
+	}
 	// packageManager looks like "pnpm@10.4.1+sha512.abc".
-	if pm := n.Package.PackageManager; pm != "" {
+	if pm != "" {
 		name, version, _ := strings.Cut(strings.SplitN(pm, "+", 2)[0], "@")
 		if n.Manager == "" {
 			n.Manager = name
@@ -142,18 +182,77 @@ func readNode(f *Facts) (*Node, error) {
 		n.Manager = "npm"
 	}
 	if n.Manager == "yarn" {
-		lock, _ := f.read("yarn.lock")
-		yarnrc, _ := f.read(".yarnrc.yml")
-		if f.Has(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || !strings.HasPrefix(n.ManagerVersion+"1", "1") {
+		lock, _ := f.rootRead("yarn.lock")
+		yarnrc, _ := f.rootRead(".yarnrc.yml")
+		if f.rootHas(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || !strings.HasPrefix(n.ManagerVersion+"1", "1") {
 			n.Manager = "yarn-berry"
 			n.PnP = !nodeLinkerRe.MatchString(yarnrc)
 		}
 	}
 	n.Version = strings.TrimPrefix(f.firstLine(".nvmrc", ".node-version"), "v")
+	if n.Version == "" && f.Workspace != nil {
+		root := &Facts{Dir: f.Workspace.Root}
+		n.Version = strings.TrimPrefix(root.firstLine(".nvmrc", ".node-version"), "v")
+	}
 	if n.Version == "" || strings.HasPrefix(n.Version, "lts") {
 		n.Version = n.Package.Engines.Node
 	}
 	return n, nil
+}
+
+// findWorkspace walks up from an app to the JS workspace that lists it, stopping at the repo root.
+func findWorkspace(dir string) (*Workspace, error) {
+	app, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	for parent := filepath.Dir(app); ; parent = filepath.Dir(parent) {
+		patterns, err := workspacePatterns(parent)
+		if err != nil {
+			return nil, err
+		}
+		rel, _ := filepath.Rel(parent, app)
+		rel = filepath.ToSlash(rel)
+		for _, p := range patterns {
+			if ok, _ := path.Match(p, rel); ok || strings.HasPrefix(rel, strings.TrimSuffix(p, "**")) && strings.HasSuffix(p, "/**") {
+				return &Workspace{Root: parent, App: rel}, nil
+			}
+		}
+		if _, err := os.Stat(filepath.Join(parent, ".git")); err == nil || parent == filepath.Dir(parent) {
+			return nil, nil
+		}
+	}
+}
+
+func workspacePatterns(dir string) ([]string, error) {
+	if b, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml")); err == nil {
+		var ws struct {
+			Packages []string `yaml:"packages"`
+		}
+		if err := yaml.Unmarshal(b, &ws); err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "pnpm-workspace.yaml"), err)
+		}
+		return ws.Packages, nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return nil, nil
+	}
+	var pkg struct {
+		Workspaces json.RawMessage `json:"workspaces"`
+	}
+	if err := json.Unmarshal(b, &pkg); err != nil || len(pkg.Workspaces) == 0 {
+		return nil, nil
+	}
+	var patterns []string
+	if json.Unmarshal(pkg.Workspaces, &patterns) != nil {
+		var yarnClassic struct {
+			Packages []string `json:"packages"`
+		}
+		json.Unmarshal(pkg.Workspaces, &yarnClassic)
+		patterns = yarnClassic.Packages
+	}
+	return patterns, nil
 }
 
 var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
