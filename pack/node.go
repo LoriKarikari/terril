@@ -183,10 +183,35 @@ func workspaceBuild(f *Facts, m nodeManager) (string, error) {
 		return m.exec + " turbo run build --filter=" + shellQuote([]string{name}), nil
 	case f.Node.Manager == "pnpm":
 		return "pnpm --filter " + shellQuote([]string{name + "..."}) + " run build", nil
-	case f.Node.Package.Scripts["build"] != "":
-		return "cd " + shellQuote([]string{f.Workspace.App}) + " && " + m.run + " build", nil
 	}
-	return "", nil
+	var builds []string
+	for _, dir := range buildOrder(f.Workspace.Members, name) {
+		builds = append(builds, "(cd "+shellQuote([]string{dir})+" && "+m.run+" build)")
+	}
+	return strings.Join(builds, " && "), nil
+}
+
+// buildOrder lists the dirs of name and its workspace dependencies that have a build
+// script, dependencies first.
+func buildOrder(members map[string]Member, name string) []string {
+	var order []string
+	seen := map[string]bool{}
+	var visit func(string)
+	visit = func(n string) {
+		m, ok := members[n]
+		if !ok || seen[n] {
+			return
+		}
+		seen[n] = true
+		for _, d := range m.Deps {
+			visit(d)
+		}
+		if m.Build {
+			order = append(order, m.Dir)
+		}
+	}
+	visit(name)
+	return order
 }
 
 func nodeStart(f *Facts) (Cmd, error) {
