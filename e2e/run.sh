@@ -22,6 +22,7 @@ for name in "${names[@]}"; do
   image=wolkpack-e2e-$name
   log=e2e/logs/$name.log
   mkdir -p e2e/logs
+  : >"$log"
 
   if [ -f "$dir/expect-error" ]; then
     want=$(cat "e2e/testdata/$name/expect-error")

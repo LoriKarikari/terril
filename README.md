@@ -1,6 +1,6 @@
 # wolkpack
 
-wolkpack builds a container image from a Node, Python, Ruby or Go app.
+wolkpack builds a container image from a Node, Python, Ruby, PHP or Go app.
 
 ```sh
 wolkpack build ./my-app
@@ -13,7 +13,7 @@ wolkpack reads the app's manifest and lockfile to work out how to install, build
 
 The app builds in one image and runs in a separate, smaller one that contains only what it needs at runtime. That image runs as a non-root user and listens on `$PORT`, which defaults to 8080.
 
-For Node, Python, Go and static sites, the runtime image is distroless, so it has no shell or package manager. Those apps get a Debian image instead when their start command needs a shell or `wolkpack.toml` adds apt packages. Ruby apps run on the official `ruby` slim image.
+For Node, Python, PHP, Go and static sites, the runtime image is distroless, so it has no shell or package manager. Those apps get a Debian image instead when their start command needs a shell or `wolkpack.toml` adds apt packages. Ruby apps run on the official `ruby` slim image.
 
 ## Install
 
@@ -52,6 +52,7 @@ wolkpack build -t api:dev ./my-app
 | Node | npm, pnpm, Yarn, Bun | Next.js, Nuxt, Astro, React Router, or any app with a `start` script |
 | Python | pip, uv, Poetry | Django, FastAPI, Flask |
 | Ruby | Bundler | Rails, or any Rack app with puma |
+| PHP | Composer | Laravel, or any app with `public/index.php` or `index.php` |
 | Go | Go modules | any, including apps that use cgo |
 | Static sites | none, or any Node build | plain HTML, Vite apps without a server |
 
@@ -59,7 +60,9 @@ A `web:` line in a `Procfile` replaces the start command.
 
 A folder with only an `index.html`, or a Vite app with no `start` script, is served as a static site by Caddy. Vite apps get single-page-app routing, so `/dashboard` serves `index.html`.
 
-If a Python, Ruby or Go app has a `package.json` with a `build` script, Node runs that script first. The final image doesn't include Node. For Django apps that set `STATIC_ROOT`, wolkpack then runs `collectstatic`. Rails apps get `assets:precompile`. Rails needs `SECRET_KEY_BASE` or `RAILS_MASTER_KEY` when the container starts, and wolkpack never puts either in the image.
+If a Python, Ruby, PHP or Go app has a `package.json` with a `build` script, Node runs that script first. The final image doesn't include Node. For Django apps that set `STATIC_ROOT`, wolkpack then runs `collectstatic`. Rails apps get `assets:precompile`. Rails needs `SECRET_KEY_BASE` or `RAILS_MASTER_KEY` when the container starts, and wolkpack never puts either in the image.
+
+PHP apps run on [FrankenPHP](https://frankenphp.dev)'s static build, which has PHP 8.5 and 80 extensions, such as intl, gd, pdo_pgsql and redis. The same binary runs Composer, so an app that needs another extension fails at `composer install` and names it. Laravel apps need `APP_KEY` when the container starts, and log to stderr.
 
 ## Build-time variables
 

@@ -24,6 +24,7 @@ type Facts struct {
 	Node        *Node
 	Python      *Python
 	Ruby        *Ruby
+	PHP         *PHP
 	Go          *modfile.File
 	GoCgo       bool
 	Config      Config
@@ -82,6 +83,14 @@ type Python struct {
 	Requirements []string
 	Deps         map[string]bool
 	Version      string
+}
+
+type PHP struct {
+	Composer bool
+	// Package names from composer.lock.
+	Packages map[string]bool
+	// "public" for apps with public/index.php, "" for an index.php at the root.
+	DocRoot string
 }
 
 type Ruby struct {
@@ -144,6 +153,9 @@ func Read(dir string) (*Facts, error) {
 		return nil, err
 	}
 	if f.Ruby, err = readRuby(f); err != nil {
+		return nil, err
+	}
+	if f.PHP, err = readPHP(f); err != nil {
 		return nil, err
 	}
 	if f.Python != nil && f.Workspace == nil {
@@ -495,6 +507,38 @@ var (
 	gemfileRubyRe     = regexp.MustCompile(`(?m)^\s*ruby\s+["']([^"']+)["']`)
 	rubyVersionNumber = regexp.MustCompile(`\d+(\.\d+){0,2}`)
 )
+
+func readPHP(f *Facts) (*PHP, error) {
+	p := &PHP{Packages: map[string]bool{}, Composer: f.Has("composer.json")}
+	switch {
+	case f.Has("public/index.php"):
+		p.DocRoot = "public"
+	case f.Has("index.php"):
+	case p.Composer:
+		return nil, fmt.Errorf("composer.json found, but no index.php in public/ or the app root")
+	default:
+		return nil, nil
+	}
+	if !p.Composer {
+		return p, nil
+	}
+	lock, ok := f.read("composer.lock")
+	if !ok {
+		return nil, fmt.Errorf("composer.json has no composer.lock; run composer update and commit it")
+	}
+	var doc struct {
+		Packages []struct {
+			Name string `json:"name"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(lock), &doc); err != nil {
+		return nil, fmt.Errorf("composer.lock: %w", err)
+	}
+	for _, pkg := range doc.Packages {
+		p.Packages[pkg.Name] = true
+	}
+	return p, nil
+}
 
 func readRuby(f *Facts) (*Ruby, error) {
 	if !f.Has("Gemfile") {
