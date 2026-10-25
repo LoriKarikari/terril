@@ -17,12 +17,14 @@ For Node, Python, PHP, Go and static sites, the runtime image is distroless, so 
 
 ## Install
 
-You need Go 1.27 and Docker 23 or later.
+wolkpack runs on Linux and macOS, on amd64 and arm64. It needs Docker 23 or later.
+
+Download the archive for your system from the [releases page](https://github.com/LoriKarikari/wolkpack/releases), unpack it, and put `wolkpack` on your `PATH`. `checksums.txt` lists each archive's SHA-256.
+
+With Go 1.27 or later, you can install it from source instead:
 
 ```sh
-git clone git@github.com:LoriKarikari/wolkpack.git
-cd wolkpack
-go build -o bin/wolkpack ./cmd/wolkpack
+go install github.com/LoriKarikari/wolkpack/cmd/wolkpack@latest
 ```
 
 ## Use

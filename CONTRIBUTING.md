@@ -86,6 +86,10 @@ Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
 
 `just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. It builds one app at a time, because parallel builds that share steps can miss Docker's cache. CI runs it on every pull request that changes code.
 
+## Releases
+
+A maintainer pushes a tag like `v0.1.0` to `main`. The release workflow runs GoReleaser, which builds `wolkpack` for Linux and macOS on amd64 and arm64 and publishes the archives and `checksums.txt` as a GitHub release. The changelog comes from the Conventional Commit titles.
+
 ## Using AI tools
 
 AI-assisted pull requests and issues are fine. They meet the same bar as any other change:
