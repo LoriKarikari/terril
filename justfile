@@ -7,7 +7,12 @@ build:
 # Builds, runs and checks every app in e2e/testdata, or only the ones named.
 [positional-arguments]
 test *apps:
-    e2e/run.sh "$@"
+    cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestApps -apps "$(IFS=,; echo "$*")" .
+
+# Rebuilds every app, or the ones named, after a source edit, and fails if the dependency install reruns.
+[positional-arguments]
+cache *apps:
+    cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestCache -apps "$(IFS=,; echo "$*")" .
 
 lint:
     go vet ./...

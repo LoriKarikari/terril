@@ -13,7 +13,8 @@ wolkpack is an open-source CLI that builds a container image from a Node, Python
 ## Commands
 
 - `just build` builds `bin/wolkpack`.
-- `just test` runs the end-to-end tests. `just test python-flask` runs one app.
+- `just test` runs the end-to-end tests in `e2e/e2e_test.go`. `just test python-flask` runs one app.
+- `just cache` checks that a source edit doesn't rerun the dependency install.
 - `just lint` runs `go vet` and `gofmt`, the same checks CI runs.
 
 ## Rules
