@@ -12,3 +12,5 @@ test *apps:
 lint:
     go vet ./...
     test -z "$(gofmt -l .)"
+    # A rule in the root .gitignore must not drop test app files; CI only sees committed ones.
+    test -z "$(git ls-files --others --ignored --exclude-standard e2e/testdata | git check-ignore -v --stdin | grep '^.gitignore:' | grep -v node_modules)"

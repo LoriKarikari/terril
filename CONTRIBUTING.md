@@ -75,6 +75,7 @@ A test app can also have these files:
 - `path` holds the URL path to request. The default is `/`.
 - `app` names a subfolder to build, for monorepos.
 - `absent` lists package names that must not be in the image.
+- `run-env` holds `KEY=VALUE` lines that the script passes to `docker run -e`, for values a platform sets at runtime, such as secrets.
 - `build-env` holds `KEY=VALUE` lines that the script passes with `--env`. It builds once with other values first, so a cached build fails the test. A line that starts with `secret ` must not appear anywhere in the image. Add `build-env` to the app's `.dockerignore`. No `--env` value may appear in the image's history or config.
 
 Before each build, the script adds a `node_modules` and a `__pycache__` folder to the app. The test fails if either ends up in the image.

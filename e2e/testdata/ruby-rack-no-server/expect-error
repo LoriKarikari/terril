@@ -1,0 +1,1 @@
+this is a Rack app but no server is in its Gemfile; add puma

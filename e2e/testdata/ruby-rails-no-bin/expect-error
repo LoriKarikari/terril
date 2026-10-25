@@ -1,0 +1,1 @@
+this is a Rails app but bin/rails is missing; commit the bin/ folder that rails new created
