@@ -54,7 +54,7 @@ feat(config)!: rename packages to apt-packages
 
 ## Testing
 
-wolkpack has one kind of test. `e2e/run.sh` builds every app in `e2e/testdata/` with wolkpack, starts it, and checks its HTTP response. You need Docker.
+wolkpack has one kind of test. `e2e/e2e_test.go` builds every app in `e2e/testdata/` with the wolkpack CLI, starts it, and checks its HTTP response. You need Docker and [dive](https://github.com/wagoodman/dive).
 
 Run every app, or only some:
 
@@ -63,7 +63,9 @@ just test
 just test python-flask node-pnpm
 ```
 
-The script prints a table and writes it to `e2e/results.tsv`, with each image's size on disk, its compressed pull size, its [dive](https://github.com/wagoodman/dive) efficiency and wasted bytes, and its user. A test fails if dive's efficiency score is below 95%, which means files are duplicated or deleted across layers. You need dive and jq installed. Build logs go to `e2e/logs/`. A test fails if the image runs as root.
+The run prints a table and writes it to `e2e/results.tsv`, with each image's size on disk, its compressed pull size, dive's efficiency and wasted bytes, and its user. A test fails if the image runs as root, or if dive's efficiency score is below 95%, which means files are duplicated or deleted across layers. Build logs go to `e2e/logs/`.
+
+Apps build four at a time. Each test removes its images when it ends, even when it fails, and the run trims Docker's build cache to 10 GB at the end. Pass `-keep` to `go test` to keep the images.
 
 ### Add a test app
 
@@ -75,14 +77,14 @@ A test app can also have these files:
 - `path` holds the URL path to request. The default is `/`.
 - `app` names a subfolder to build, for monorepos.
 - `absent` lists package names that must not be in the image.
-- `run-env` holds `KEY=VALUE` lines that the script passes to `docker run -e`, for values a platform sets at runtime, such as secrets.
-- `build-env` holds `KEY=VALUE` lines that the script passes with `--env`. It builds once with other values first, so a cached build fails the test. A line that starts with `secret ` must not appear anywhere in the image. Add `build-env` to the app's `.dockerignore`. No `--env` value may appear in the image's history or config.
+- `run-env` holds `KEY=VALUE` lines that the test passes to `docker run -e`, for values a platform sets at runtime, such as secrets.
+- `build-env` holds `KEY=VALUE` lines that the test passes with `--env`. It builds once with other values first, so a cached build fails the test. A line that starts with `secret ` must not appear anywhere in the image. Add `build-env` to the app's `.dockerignore`. No `--env` value may appear in the image's history or config.
 
-Before each build, the script adds a `node_modules` and a `__pycache__` folder to the app. The test fails if either ends up in the image.
+Before each build, the test adds a `node_modules` and a `__pycache__` folder to the app. The test fails if either ends up in the image.
 
 Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
 
-`e2e/cache.sh` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. CI runs it on every pull request that changes code.
+`just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. It builds one app at a time, because parallel builds that share steps can miss Docker's cache. CI runs it on every pull request that changes code.
 
 ## Using AI tools
 
