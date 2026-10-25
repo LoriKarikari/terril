@@ -84,7 +84,7 @@ Before each build, the test adds a `node_modules` and a `__pycache__` folder to 
 
 Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
 
-`just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. CI runs it on every pull request that changes code.
+`just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. It builds one app at a time, because parallel builds that share steps can miss Docker's cache. CI runs it on every pull request that changes code.
 
 ## Using AI tools
 

@@ -10,9 +10,10 @@ test *apps:
     cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestApps -apps "$(IFS=,; echo "$*")" .
 
 # Rebuilds every app, or the ones named, after a source edit, and fails if the dependency install reruns.
+# One app at a time: under parallel builds that share steps, BuildKit can miss a cached step.
 [positional-arguments]
 cache *apps:
-    cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestCache -apps "$(IFS=,; echo "$*")" .
+    cd e2e && go test -count=1 -timeout 60m -parallel 1 -run TestCache -apps "$(IFS=,; echo "$*")" .
 
 lint:
     go vet ./...
