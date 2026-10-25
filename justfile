@@ -1,3 +1,5 @@
+golangci := "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0"
+
 default:
     @just --list
 
@@ -15,8 +17,11 @@ test *apps:
 cache *apps:
     cd e2e && go test -count=1 -timeout 60m -parallel 1 -run TestCache -apps "$(IFS=,; echo "$*")" .
 
+fmt:
+    {{golangci}} fmt ./...
+
 lint:
-    go vet ./...
-    test -z "$(gofmt -l .)"
+    {{golangci}} run ./...
+    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
     # A rule in the root .gitignore must not drop test app files; CI only sees committed ones.
     test -z "$(git ls-files --others --ignored --exclude-standard e2e/testdata | git check-ignore -v --stdin | grep '^.gitignore:' | grep -v node_modules)"
