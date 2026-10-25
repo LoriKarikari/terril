@@ -1,5 +1,3 @@
-// Package e2e builds every app in testdata with the wolkpack CLI, runs the image, and checks
-// what a user of the image would see. It needs Docker and dive.
 package e2e
 
 import (
@@ -73,18 +71,15 @@ func TestMain(m *testing.M) {
 		}
 		fmt.Printf("total: %d images, pull %.1f MB, disk %.1f MB\n", n, pull, disk)
 	}
-	// Every build adds to BuildKit's cache. Trimming it to 10 GB keeps the most recent layers,
-	// so reruns stay fast without the cache growing with every run.
+	// Keeps recent layers so reruns stay fast, without the cache growing every run.
 	if !*keep {
 		exec.Command("docker", "builder", "prune", "-f", "--max-used-space", "10GB").Run()
 	}
 	os.Exit(code)
 }
 
-// An app in testdata and the files that say how to check it.
 type fixture struct {
-	name string
-	// The folder wolkpack builds, which the app file can move into a subfolder.
+	name        string
 	dir         string
 	expect      string
 	expectError string
@@ -137,7 +132,7 @@ func fixtures(t *testing.T) []fixture {
 	return fs
 }
 
-// readFile reads a regular file; php-laravel and Rails apps have an app/ folder, not an app file.
+// php-laravel and Rails apps have an app/ folder, not an app file.
 func readFile(dir, name string) (string, bool) {
 	p := filepath.Join(dir, name)
 	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
@@ -304,8 +299,6 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	r.detail = "got: " + got
 }
 
-// plantHostArtifacts adds a node_modules and a __pycache__ to the app, as a developer's
-// checkout would have, so the test fails if either reaches the image.
 func plantHostArtifacts(t *testing.T, dir string) {
 	root := filepath.Join(dir, "host-artifacts")
 	for _, d := range []string{"node_modules", "__pycache__"} {
@@ -325,7 +318,6 @@ type rootfs struct {
 	secretsFound []string
 }
 
-// exportImage reads the image's filesystem once for its size, its file list and any secrets.
 func exportImage(image string, secrets []string) (rootfs, error) {
 	var fs rootfs
 	id, err := exec.Command("docker", "create", image).Output()
@@ -399,8 +391,6 @@ func countOutput(name string, args ...string) (int64, error) {
 
 func mb(bytes int64) string { return fmt.Sprintf("%.1f", float64(bytes)/1e6) }
 
-// dive returns the image's efficiency in percent and its wasted bytes in MB, floored like
-// dive's own report.
 func dive(image string) (float64, float64, error) {
 	out, err := os.CreateTemp("", "dive-*.json")
 	if err != nil {
@@ -427,8 +417,6 @@ func dive(image string) (float64, float64, error) {
 	return math.Floor(report.Image.EfficiencyScore*10000) / 100, math.Floor(report.Image.InefficientBytes/1e5) / 10, nil
 }
 
-// shippedPackages finds packages from absent in node_modules, pnpm's and Bun's stores,
-// Yarn's zip cache, or site-packages.
 func shippedPackages(files, absent []string) []string {
 	var shipped []string
 	for _, pkg := range absent {
@@ -440,8 +428,6 @@ func shippedPackages(files, absent []string) []string {
 	return shipped
 }
 
-// leakedValues finds build env values in the image's history and config, and secrets anywhere
-// in its files.
 func leakedValues(t *testing.T, image string, f fixture, secretsFound []string) []string {
 	history, err := exec.Command("docker", "history", "--no-trunc", image).Output()
 	if err != nil {
@@ -464,8 +450,6 @@ func leakedValues(t *testing.T, image string, f fixture, secretsFound []string) 
 	return leaked
 }
 
-// serve starts the image and requests the app's path until it answers with the expected text,
-// or for 30 seconds.
 func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) {
 	args := []string{"run", "-d"}
 	for _, kv := range f.runEnv {
@@ -504,8 +488,6 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 	return body, nil
 }
 
-// TestCache builds each app, adds a source file, and rebuilds. The first dependency install in
-// the plan must come from Docker's cache.
 func TestCache(t *testing.T) {
 	for _, f := range fixtures(t) {
 		if f.expectError != "" || len(f.buildEnv) > 0 {
@@ -606,7 +588,6 @@ func newLog(t *testing.T, name string) *os.File {
 	return log
 }
 
-// runCmd runs a command, appends its combined output to log, and returns that output.
 func runCmd(log *os.File, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
