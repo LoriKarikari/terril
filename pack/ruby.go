@@ -25,6 +25,10 @@ var rubyEnv = []Env{
 
 func planRuby(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	r := f.Ruby
+	// Without bin/rails, the rails command acts as the app generator, not the app.
+	if r.Gems["railties"] && !f.Has("bin/rails") {
+		return nil, Runtime{}, fmt.Errorf("this is a Rails app but bin/rails is missing; commit the bin/ folder that rails new created")
+	}
 	v, err := pickVersion("ruby", r.Version, []string{"4.0", "3.4", "3.3"}, "4.0")
 	if err != nil {
 		return nil, Runtime{}, err
@@ -98,7 +102,7 @@ const pumaWithPort = `exec("bundle", "exec", "puma", "--port", ENV.fetch("PORT")
 func rubyStart(f *Facts) (Cmd, error) {
 	gems := f.Ruby.Gems
 	switch {
-	case gems["railties"] && f.Has("bin/rails"):
+	case gems["railties"]:
 		if !gems["puma"] {
 			return nil, fmt.Errorf("this is a Rails app but no server is in its Gemfile; add puma")
 		}
