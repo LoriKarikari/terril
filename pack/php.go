@@ -20,9 +20,11 @@ var phpProvider = provider{
 // needs no OS. The same binary runs Composer, so installs see the extensions the app gets.
 const frankenphpVersion = "1.13.3"
 
+// FrankenPHP re-uploaded the 1.13.3 binaries after release, so assets under a version tag can
+// change. The checksum fails the build instead of shipping a binary nobody reviewed.
 var frankenphpBuilds = []struct{ arch, asset, sha256 string }{
-	{"amd64", "x86_64", "3e3812f30a9a544b301344f599715d1a3ca5de0daa7fefb99c09ba323258f61e"},
-	{"arm64", "aarch64", "4840772c160117f8eb257dc0a4433c402dffc77670e93ac8dc28d409444da905"},
+	{"amd64", "x86_64", "103f74f9a6442b4854ebc405d4f5923dbd27a510e841a66097e20f7b02b5bc6d"},
+	{"arm64", "aarch64", "035cfd57e830764021260b592e9dd30c1102c11047bc9f66684594a32d9b1234"},
 }
 
 const composerImage = "composer:2.10.3"
