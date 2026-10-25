@@ -422,7 +422,10 @@ func workspacePatterns(dir string) ([]string, error) {
 	var pkg struct {
 		Workspaces json.RawMessage `json:"workspaces"`
 	}
-	if err := json.Unmarshal(b, &pkg); err != nil || len(pkg.Workspaces) == 0 {
+	if err := json.Unmarshal(b, &pkg); err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "package.json"), err)
+	}
+	if len(pkg.Workspaces) == 0 {
 		return nil, nil
 	}
 	var patterns []string
@@ -430,7 +433,9 @@ func workspacePatterns(dir string) ([]string, error) {
 		var yarnClassic struct {
 			Packages []string `json:"packages"`
 		}
-		json.Unmarshal(pkg.Workspaces, &yarnClassic)
+		if err := json.Unmarshal(pkg.Workspaces, &yarnClassic); err != nil {
+			return nil, fmt.Errorf("%s: workspaces must be a list or have a packages list", filepath.Join(dir, "package.json"))
+		}
 		patterns = yarnClassic.Packages
 	}
 	return patterns, nil
@@ -546,7 +551,7 @@ func readRuby(f *Facts) (*Ruby, error) {
 	}
 	lock, ok := f.read("Gemfile.lock")
 	if !ok {
-		return nil, fmt.Errorf("Gemfile has no Gemfile.lock; run bundle lock and commit it")
+		return nil, fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it")
 	}
 	r := &Ruby{Gems: map[string]bool{}}
 	for _, m := range lockGemRe.FindAllStringSubmatch(lock, -1) {
@@ -558,7 +563,7 @@ func readRuby(f *Facts) (*Ruby, error) {
 	}
 	platforms := sections["PLATFORMS"]
 	if !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }) {
-		return nil, fmt.Errorf("Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
+		return nil, fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
 			strings.Join(platforms, ", "))
 	}
 	if v := f.firstLine(".ruby-version"); v != "" {

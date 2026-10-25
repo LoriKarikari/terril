@@ -55,7 +55,7 @@ func (e *envFlags) digest() string {
 	names := slices.Sorted(slices.Values(e.names))
 	h := sha256.New()
 	for _, n := range names {
-		fmt.Fprintf(h, "%s=%s\x00", n, e.values[n])
+		h.Write([]byte(n + "=" + e.values[n] + "\x00"))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

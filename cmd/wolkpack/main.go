@@ -33,7 +33,7 @@ func main() {
 	tag := fs.String("t", "", "image tag (build only; default: directory name)")
 	var env envFlags
 	fs.Var(&env, "env", "build-time variable, KEY=VALUE or KEY (repeatable)")
-	fs.Parse(os.Args[2:])
+	_ = fs.Parse(os.Args[2:]) // ExitOnError exits instead of returning an error.
 	if fs.NArg() != 1 || (cmd != "plan" && cmd != "build") {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
