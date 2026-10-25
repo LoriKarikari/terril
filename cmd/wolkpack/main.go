@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/LoriKarikari/wolkpack/pack"
@@ -17,10 +18,26 @@ const usage = `wolkpack turns an app directory into a container image.
       print the Dockerfile
   wolkpack build [--provider name] [--env KEY[=VALUE]]... [-t tag] DIR
       build the image with docker
+  wolkpack version
+      print the version
 
 --env makes a variable available to the build steps, but not to the
 running app. Without =VALUE it takes the value from the environment.
 `
+
+// Release builds set version with -ldflags. Other builds use the version Go records from the
+// module or the git commit.
+var version = ""
+
+func versionString() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -28,6 +45,10 @@ func main() {
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
+	if cmd == "version" || cmd == "--version" || cmd == "-v" {
+		fmt.Println("wolkpack", versionString())
+		return
+	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	provider := fs.String("provider", "", "force the primary provider (go, python, node)")
 	tag := fs.String("t", "", "image tag (build only; default: directory name)")
