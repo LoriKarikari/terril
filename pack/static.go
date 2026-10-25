@@ -9,7 +9,7 @@ import (
 var staticProvider = provider{
 	name: "static",
 	detect: func(f *Facts) Role {
-		if f.Node == nil && f.Python == nil && f.Ruby == nil && f.Go == nil && f.Has("index.html") {
+		if f.Node == nil && f.Python == nil && f.Ruby == nil && f.PHP == nil && f.Go == nil && f.Has("index.html") {
 			return Primary
 		}
 		return 0
@@ -46,7 +46,7 @@ func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 		From:    "gcr.io/distroless/static-debian13",
 		Workdir: "/srv",
 		Env:     []Env{{"XDG_CONFIG_HOME", "/tmp/caddy"}, {"XDG_DATA_HOME", "/tmp/caddy"}},
-		Files:   []File{{"/etc/caddy/Caddyfile", fmt.Sprintf(caddyfile, fallback)}},
+		Files:   []File{{Path: "/etc/caddy/Caddyfile", Content: fmt.Sprintf(caddyfile, fallback)}},
 		Copies: []Copy{
 			{From: "caddy:2.11-alpine", Src: []string{"/usr/bin/caddy"}, Dst: "/usr/bin/caddy", RootOwned: true},
 			site,

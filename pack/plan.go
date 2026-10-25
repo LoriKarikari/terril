@@ -3,6 +3,7 @@ package pack
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -63,7 +64,16 @@ type Copy struct {
 
 type Env struct{ Key, Value string }
 
-type File struct{ Path, Content string }
+type File struct {
+	Path, Content string
+	Executable    bool
+}
+
+// Add downloads a file and checks its sha256 before it lands in the stage.
+type Add struct {
+	URL, SHA256, Dst string
+	Executable       bool
+}
 
 type User string
 
@@ -104,7 +114,19 @@ func (c Copy) dockerfile() string {
 }
 
 func (f File) dockerfile() string {
-	return "COPY <<'EOF' " + f.Path + "\n" + f.Content + "EOF"
+	chmod := ""
+	if f.Executable {
+		chmod = "--chmod=755 "
+	}
+	return "COPY " + chmod + "<<'EOF' " + f.Path + "\n" + f.Content + "EOF"
+}
+
+func (a Add) dockerfile() string {
+	chmod := ""
+	if a.Executable {
+		chmod = "--chmod=755 "
+	}
+	return "ADD " + chmod + "--checksum=sha256:" + a.SHA256 + " " + a.URL + " " + a.Dst
 }
 
 func (a Arg) dockerfile() string { return "ARG " + string(a) }
@@ -163,6 +185,10 @@ func (p *Plan) Dockerfile() string {
 	var b strings.Builder
 	b.WriteString("# syntax=docker/dockerfile:1\n")
 	fmt.Fprintf(&b, "# wolkpack: %s\n", p.Summary())
+	all := append(slices.Clone(p.Stages), p.Runtime.stage())
+	if slices.ContainsFunc(all, func(s Stage) bool { return strings.Contains(s.From, "${TARGETARCH}") }) {
+		b.WriteString("\nARG TARGETARCH\n")
+	}
 	stages := make([]Stage, len(p.Stages))
 	for i, s := range p.Stages {
 		s.Steps = withBuildEnv(s.Steps, p.BuildEnv)
