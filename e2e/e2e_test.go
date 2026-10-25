@@ -2,7 +2,6 @@ package e2e
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -33,6 +32,8 @@ var (
 var results = struct {
 	sync.Mutex
 	apps, cache [][]string
+	images      int
+	pull, disk  int64
 }{}
 
 func TestMain(m *testing.M) {
@@ -55,25 +56,26 @@ func TestMain(m *testing.M) {
 		}
 	}
 	code := m.Run()
-	os.RemoveAll(bin)
-	writeTable("results.tsv", []string{"example", "status", "provider", "disk_mb", "pull_mb", "dive_eff", "dive_waste_mb", "user", "detail"}, results.apps)
-	writeTable("cache.tsv", []string{"example", "status", "rebuild_s", "steps_rerun", "deps_rerun"}, results.cache)
-	if len(results.apps) > 0 {
-		var pull, disk float64
-		var n int
-		for _, r := range results.apps {
-			if r[4] != "-" {
-				p, d := 0.0, 0.0
-				fmt.Sscan(r[4], &p)
-				fmt.Sscan(r[3], &d)
-				pull, disk, n = pull+p, disk+d, n+1
-			}
+	if err := os.RemoveAll(bin); err != nil {
+		fmt.Fprintln(os.Stderr, "e2e:", err)
+	}
+	for _, err := range []error{
+		writeTable("results.tsv", []string{"example", "status", "provider", "disk_mb", "pull_mb", "dive_eff", "dive_waste_mb", "user", "detail"}, results.apps),
+		writeTable("cache.tsv", []string{"example", "status", "rebuild_s", "steps_rerun", "deps_rerun"}, results.cache),
+	} {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "e2e:", err)
+			code = 1
 		}
-		fmt.Printf("total: %d images, pull %.1f MB, disk %.1f MB\n", n, pull, disk)
+	}
+	if results.images > 0 {
+		fmt.Printf("total: %d images, pull %s MB, disk %s MB\n", results.images, mb(results.pull), mb(results.disk))
 	}
 	// Keeps recent layers so reruns stay fast, without the cache growing every run.
 	if !*keep {
-		exec.Command("docker", "builder", "prune", "-f", "--max-used-space", "10GB").Run()
+		if out, err := exec.Command("docker", "builder", "prune", "-f", "--max-used-space", "10GB").CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e: trimming the build cache: %v: %s\n", err, out)
+		}
 	}
 	os.Exit(code)
 }
@@ -166,6 +168,7 @@ func TestApps(t *testing.T) {
 
 type appResult struct {
 	name, status, provider, disk, pull, eff, waste, user, detail string
+	pullBytes, diskBytes                                         int64
 }
 
 func (r *appResult) fail(t *testing.T, format string, args ...any) {
@@ -190,6 +193,11 @@ func (r *appResult) record(t *testing.T) {
 	}
 	results.Lock()
 	results.apps = append(results.apps, row)
+	if r.pullBytes > 0 {
+		results.images++
+		results.pull += r.pullBytes
+		results.disk += r.diskBytes
+	}
 	results.Unlock()
 }
 
@@ -197,7 +205,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	image := "wolkpack-e2e-" + f.name
 	log := newLog(t, f.name+".log")
 	if !*keep {
-		t.Cleanup(func() { exec.Command("docker", "rmi", "-f", image).Run() })
+		t.Cleanup(func() { docker(t, "rmi", "-f", image) })
 	}
 
 	if f.expectError != "" {
@@ -235,16 +243,16 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		return
 	}
 
-	rootfs, err := exportImage(image, f.secrets)
+	rootfs, err := exportImage(t, image, f.secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.disk = mb(rootfs.size)
+	r.disk, r.diskBytes = mb(rootfs.size), rootfs.size
 	pull, err := countOutput("docker", "save", image)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.pull = mb(pull)
+	r.pull, r.pullBytes = mb(pull), pull
 	eff, waste, err := dive(image)
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +317,11 @@ func plantHostArtifacts(t *testing.T, dir string) {
 			t.Fatal(err)
 		}
 	}
-	t.Cleanup(func() { os.RemoveAll(root) })
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
 }
 
 type rootfs struct {
@@ -318,14 +330,14 @@ type rootfs struct {
 	secretsFound []string
 }
 
-func exportImage(image string, secrets []string) (rootfs, error) {
+func exportImage(t *testing.T, image string, secrets []string) (rootfs, error) {
 	var fs rootfs
 	id, err := exec.Command("docker", "create", image).Output()
 	if err != nil {
 		return fs, err
 	}
 	cid := strings.TrimSpace(string(id))
-	defer exec.Command("docker", "rm", cid).Run()
+	defer docker(t, "rm", cid)
 	cmd := exec.Command("docker", "export", cid)
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -357,7 +369,9 @@ func exportImage(image string, secrets []string) (rootfs, error) {
 			}
 		}
 	}
-	io.Copy(io.Discard, counter)
+	if _, err := io.Copy(io.Discard, counter); err != nil {
+		return fs, err
+	}
 	fs.size = counter.n
 	return fs, cmd.Wait()
 }
@@ -396,8 +410,10 @@ func dive(image string) (float64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	out.Close()
-	defer os.Remove(out.Name())
+	if err := out.Close(); err != nil {
+		return 0, 0, err
+	}
+	defer os.Remove(out.Name()) //nolint:errcheck // a leftover temp file doesn't affect the result
 	if b, err := exec.Command("dive", "--ci", "--json", out.Name(), image).CombinedOutput(); err != nil {
 		return 0, 0, fmt.Errorf("dive: %w: %s", err, b)
 	}
@@ -462,8 +478,10 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 	cid := strings.TrimSpace(string(id))
 	defer func() {
 		logs, _ := exec.Command("docker", "logs", cid).CombinedOutput()
-		log.Write(logs)
-		exec.Command("docker", "rm", "-f", cid).Run()
+		if _, err := log.Write(logs); err != nil {
+			t.Error(err)
+		}
+		docker(t, "rm", "-f", cid)
 	}()
 	port, err := exec.Command("docker", "port", cid, "8080").Output()
 	if err != nil {
@@ -475,7 +493,7 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 	for range 30 {
 		if res, err := client.Get("http://" + addr + f.path); err == nil {
 			b, _ := io.ReadAll(res.Body)
-			res.Body.Close()
+			_ = res.Body.Close()
 			if res.StatusCode < 400 {
 				body = string(b)
 				if strings.Contains(body, f.expect) {
@@ -518,7 +536,7 @@ func testCache(t *testing.T, f fixture) {
 	}()
 	image := "wolkpack-cache-" + f.name
 	if !*keep {
-		t.Cleanup(func() { exec.Command("docker", "rmi", "-f", image).Run() })
+		t.Cleanup(func() { docker(t, "rmi", "-f", image) })
 	}
 	work := t.TempDir()
 	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
@@ -532,8 +550,12 @@ func testCache(t *testing.T, f fixture) {
 	if err := os.WriteFile(filepath.Join(dir, "wolkpack-cache-probe.txt"), []byte(time.Now().String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	log.Truncate(0)
-	log.Seek(0, 0)
+	if err := log.Truncate(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
 	start := time.Now()
 	out, err := runCmd(log, wolkpack, "build", "-t", image, dir)
 	secs := time.Since(start).Seconds()
@@ -584,8 +606,19 @@ func newLog(t *testing.T, name string) *os.File {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { log.Close() })
+	t.Cleanup(func() {
+		if err := log.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	return log
+}
+
+// docker runs a cleanup command. A failure is logged, not fatal, so the remaining cleanups still run.
+func docker(t *testing.T, args ...string) {
+	if out, err := exec.Command("docker", args...).CombinedOutput(); err != nil {
+		t.Logf("docker %s: %v: %s", strings.Join(args, " "), err, out)
+	}
 }
 
 func runCmd(log *os.File, name string, args ...string) (string, error) {
@@ -599,23 +632,21 @@ func runCmd(log *os.File, name string, args ...string) (string, error) {
 	return out.String(), err
 }
 
-func writeTable(name string, header []string, rows [][]string) {
+func writeTable(name string, header []string, rows [][]string) error {
 	if len(rows) == 0 {
-		return
+		return nil
 	}
 	slices.SortFunc(rows, func(a, b []string) int { return strings.Compare(a[0], b[0]) })
-	f, err := os.Create(name)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	w := bufio.NewWriter(f)
+	var b strings.Builder
 	for _, row := range append([][]string{header}, rows...) {
-		line := strings.Join(row, "\t")
-		fmt.Fprintln(w, line)
-		fmt.Fprintln(tw, line)
+		b.WriteString(strings.Join(row, "\t") + "\n")
 	}
-	w.Flush()
-	tw.Flush()
+	if err := os.WriteFile(name, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if _, err := tw.Write([]byte(b.String())); err != nil {
+		return err
+	}
+	return tw.Flush()
 }
