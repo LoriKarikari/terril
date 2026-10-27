@@ -1,4 +1,4 @@
-module github.com/LoriKarikari/wolkpack
+module github.com/LoriKarikari/terril
 
 go 1.27.3
 

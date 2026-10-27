@@ -4,7 +4,7 @@ default:
     @just --list
 
 build:
-    go build -o bin/wolkpack ./cmd/wolkpack
+    go build -o bin/terril ./cmd/terril
 
 # Builds, runs and checks every app in e2e/testdata, or only the ones named.
 [positional-arguments]

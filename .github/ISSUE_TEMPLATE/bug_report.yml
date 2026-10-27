@@ -1,5 +1,5 @@
 name: Bug report
-description: wolkpack builds a wrong image, or fails on an app it should build.
+description: terril builds a wrong image, or fails on an app it should build.
 labels: [bug]
 body:
   - type: textarea
@@ -12,8 +12,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: wolkpack commit
-      description: The output of `git rev-parse --short HEAD` in your wolkpack checkout.
+      label: terril commit
+      description: The output of `git rev-parse --short HEAD` in your terril checkout.
     validations:
       required: true
   - type: dropdown
@@ -39,8 +39,8 @@ body:
   - type: textarea
     id: plan
     attributes:
-      label: wolkpack plan output
-      description: The output of `wolkpack plan` for the app.
+      label: terril plan output
+      description: The output of `terril plan` for the app.
       render: dockerfile
   - type: textarea
     id: expected

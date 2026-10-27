@@ -9,16 +9,16 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/LoriKarikari/wolkpack/pack"
+	"github.com/LoriKarikari/terril/pack"
 )
 
-const usage = `wolkpack turns an app directory into a container image.
+const usage = `terril turns an app directory into a container image.
 
-  wolkpack plan  [--provider name] [--env KEY]... DIR
+  terril plan  [--provider name] [--env KEY]... DIR
       print the Dockerfile
-  wolkpack build [--provider name] [--env KEY[=VALUE]]... [-t tag] DIR
+  terril build [--provider name] [--env KEY[=VALUE]]... [-t tag] DIR
       build the image with docker
-  wolkpack version
+  terril version
       print the version
 
 --env makes a variable available to the build steps, but not to the
@@ -46,7 +46,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	if cmd == "version" || cmd == "--version" || cmd == "-v" {
-		fmt.Println("wolkpack", versionString())
+		fmt.Println("terril", versionString())
 		return
 	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
@@ -62,7 +62,7 @@ func main() {
 	dir := fs.Arg(0)
 
 	if err := run(cmd, dir, *provider, *tag, &env); err != nil {
-		fmt.Fprintln(os.Stderr, "wolkpack:", err)
+		fmt.Fprintln(os.Stderr, "terril:", err)
 		os.Exit(1)
 	}
 }
@@ -90,7 +90,7 @@ func run(cmd, dir, provider, tag string, env *envFlags) error {
 		abs, _ := filepath.Abs(dir)
 		tag = strings.ToLower(filepath.Base(abs))
 	}
-	fmt.Fprintf(os.Stderr, "wolkpack: building %s as %s\n", plan.Summary(), tag)
+	fmt.Fprintf(os.Stderr, "terril: building %s as %s\n", plan.Summary(), tag)
 	args := []string{"build", "-t", tag, "-f", "-"}
 	dockerEnv := os.Environ()
 	if len(env.names) > 0 {

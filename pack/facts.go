@@ -28,7 +28,7 @@ type Facts struct {
 	Go          *modfile.File
 	GoCgo       bool
 	Config      Config
-	// From wolkpack.toml, else the Procfile web: line.
+	// From terril.toml, else the Procfile web: line.
 	Start string
 }
 
@@ -186,7 +186,10 @@ func Read(dir string) (*Facts, error) {
 	if s, ok := f.read("Procfile"); ok {
 		f.Start = procfileWeb(s)
 	}
-	if s, ok := f.read("wolkpack.toml"); ok {
+	if f.Has("wolkpack.toml") {
+		return nil, fmt.Errorf("wolkpack.toml is now terril.toml; rename the file")
+	}
+	if s, ok := f.read("terril.toml"); ok {
 		if f.Config, err = parseConfig(s); err != nil {
 			return nil, err
 		}
@@ -659,14 +662,14 @@ func parseConfig(s string) (Config, error) {
 	var c Config
 	md, err := toml.Decode(s, &c)
 	if err != nil {
-		return c, fmt.Errorf("wolkpack.toml: %w", err)
+		return c, fmt.Errorf("terril.toml: %w", err)
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
-		return c, fmt.Errorf("wolkpack.toml: unknown key %q (have: provider, start, packages, build-packages)", keys[0].String())
+		return c, fmt.Errorf("terril.toml: unknown key %q (have: provider, start, packages, build-packages)", keys[0].String())
 	}
 	for _, p := range append(c.Packages, c.BuildPackages...) {
 		if !aptPackageRe.MatchString(p) {
-			return c, fmt.Errorf("wolkpack.toml: %q isn't a Debian package name", p)
+			return c, fmt.Errorf("terril.toml: %q isn't a Debian package name", p)
 		}
 	}
 	return c, nil

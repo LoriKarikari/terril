@@ -1,6 +1,6 @@
 version: 2
 builds:
-  - main: ./cmd/wolkpack
+  - main: ./cmd/terril
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]

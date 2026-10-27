@@ -1,6 +1,6 @@
-# Contributing to wolkpack with an AI agent
+# Contributing to terril with an AI agent
 
-This guide is for coding agents preparing a pull request or an issue for wolkpack, and for the people running them. `CONTRIBUTING.md` says which changes are accepted. `AGENTS.md` holds the project rules. This file is the workflow. Run the steps in order. Each one ends in something you can show.
+This guide is for coding agents preparing a pull request or an issue for terril, and for the people running them. `CONTRIBUTING.md` says which changes are accepted. `AGENTS.md` holds the project rules. This file is the workflow. Run the steps in order. Each one ends in something you can show.
 
 ## Steps
 
@@ -16,7 +16,7 @@ Read the "What's welcome" section of `CONTRIBUTING.md` and place the change in o
 
 ### 2. Reproduce the problem with the real binary
 
-Build wolkpack and run it on an app that shows the problem. Save the exact commands, the output of `wolkpack plan`, the build log, and what the container does when it runs.
+Build terril and run it on an app that shows the problem. Save the exact commands, the output of `terril plan`, the build log, and what the container does when it runs.
 
 A guess from reading the code isn't a reproduction.
 
@@ -35,9 +35,9 @@ Change only what the cause requires. Leave unrelated cleanups, renames and refac
 Check the change against every rule in `AGENTS.md`. The ones agents break most often are these:
 
 - Providers read typed facts. Reading an app file outside `pack/facts.go` is wrong.
-- When two answers are equally likely, wolkpack fails with an error that names both.
+- When two answers are equally likely, terril fails with an error that names both.
 - Images run as UID 1000 and contain only what the app needs at runtime.
-- Any change to CLI flags or `wolkpack.toml` is a contract change. That needs an issue first, which means going back to step 1.
+- Any change to CLI flags or `terril.toml` is a contract change. That needs an issue first, which means going back to step 1.
 
 **Done when** the diff touches only what step 3 named, and every `AGENTS.md` rule still holds.
 

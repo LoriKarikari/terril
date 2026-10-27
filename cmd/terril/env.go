@@ -12,7 +12,7 @@ import (
 
 var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// envFlags collects --env KEY=VALUE, or --env KEY to take the value from wolkpack's own environment.
+// envFlags collects --env KEY=VALUE, or --env KEY to take the value from terril's own environment.
 type envFlags struct {
 	names  []string
 	values map[string]string

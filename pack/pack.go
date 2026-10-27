@@ -48,7 +48,7 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 			return nil, fmt.Errorf("%s is in the uv workspace at %s, but builds as %s", f.Dir, ws.Root, primary.name)
 		}
 		if roles["node"]&Assets != 0 {
-			return nil, fmt.Errorf("%s builds Node assets, which wolkpack doesn't support inside a uv workspace yet", f.Dir)
+			return nil, fmt.Errorf("%s builds Node assets, which terril doesn't support inside a uv workspace yet", f.Dir)
 		}
 		plan.Context = ws.Root
 	}
