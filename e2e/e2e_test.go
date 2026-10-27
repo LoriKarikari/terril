@@ -32,6 +32,7 @@ var (
 var results = struct {
 	sync.Mutex
 	apps       [][]string
+	built      []string
 	images     int
 	pull, disk int64
 }{}
@@ -65,6 +66,13 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "e2e:", err)
 			code = 1
+		}
+	}
+	// Removing an image while other apps still build makes Docker drop layers those builds
+	// share, and their rebuilds then miss the cache. So images go once every test is done.
+	if !*keep && len(results.built) > 0 {
+		if out, err := exec.Command("docker", append([]string{"rmi", "-f"}, results.built...)...).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e: removing images: %v: %s\n", err, out)
 		}
 	}
 	if results.images > 0 {
@@ -203,9 +211,9 @@ func (r *appResult) record(t *testing.T) {
 func testApp(t *testing.T, f fixture, r *appResult) {
 	image := "wolkpack-e2e-" + f.name
 	log := newLog(t, f.name+".log")
-	if !*keep {
-		t.Cleanup(func() { docker(t, "rmi", "-f", image) })
-	}
+	results.Lock()
+	results.built = append(results.built, image)
+	results.Unlock()
 
 	if f.expectError != "" {
 		out, err := runCmd(log, wolkpack, "build", "-t", image, f.dir)
