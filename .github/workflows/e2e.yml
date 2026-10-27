@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   changes:
@@ -18,9 +19,12 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          if [ -z "$BASE" ]; then
+            BASE=$(git merge-base origin/main HEAD)
+          fi
           if ! files=$(git diff --name-only "$BASE" "$GITHUB_SHA"); then
             echo code=true >>"$GITHUB_OUTPUT"
-          elif grep -qvE '(\.md|^LICENSE|^\.gitignore|^docs/.*)$' <<<"$files"; then
+          elif grep -qvE '(\.md|^LICENSE|^\.gitignore|^docs/.*|^\.release-please-manifest\.json)$' <<<"$files"; then
             echo code=true >>"$GITHUB_OUTPUT"
           else
             echo code=false >>"$GITHUB_OUTPUT"
