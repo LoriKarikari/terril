@@ -12,23 +12,8 @@ archives:
   - formats: [tar.gz]
 checksum:
   name_template: checksums.txt
+# release-please writes the release notes; GoReleaser only uploads the archives.
+release:
+  mode: keep-existing
 changelog:
-  use: github
-  groups:
-    - title: Features
-      regexp: '^.*?feat(\(.+\))??!?:.+$'
-      order: 0
-    - title: Fixes
-      regexp: '^.*?fix(\(.+\))??!?:.+$'
-      order: 1
-    - title: Performance
-      regexp: '^.*?perf(\(.+\))??!?:.+$'
-      order: 2
-    - title: Other
-      order: 999
-  filters:
-    exclude:
-      - '^docs'
-      - '^test'
-      - '^chore'
-      - '^ci'
+  disable: true
