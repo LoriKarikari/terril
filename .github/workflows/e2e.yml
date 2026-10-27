@@ -52,22 +52,11 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # BuildKit garbage-collects its cache when free disk drops below 20%, which deletes cached
-      # steps mid-run on a stock runner. These preinstalled SDKs are unused here.
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-          df -h /
       - name: Install dive
         run: |
           curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
           sudo apt-get install -y /tmp/dive.deb
       - run: cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestApps .
-      - if: always()
-        run: |
-          df -h /
-          docker system df
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
