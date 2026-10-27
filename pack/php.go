@@ -18,17 +18,27 @@ var phpProvider = provider{
 
 // FrankenPHP's static build embeds PHP and its extensions in one binary, so the runtime
 // needs no OS. The same binary runs Composer, so installs see the extensions the app gets.
-const frankenphpVersion = "1.13.3"
-
+//
 // FrankenPHP rebuilds the binaries of its latest release every night under the same names, so
-// pin a release that already has a newer one; its binaries no longer change. Check a new pin with
-// gh attestation verify --repo php/frankenphp.
+// pin a release that already has a newer one; its binaries no longer change. Renovate waits a
+// week before proposing a release for that reason.
+//
+// renovate: datasource=github-releases depName=php/frankenphp
+const frankenphpVersion = "v1.13.3"
+
+// renovate: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.3
+const frankenphpAmd64 = "f88db9972ddac5e4c097c8b703e585255e181411687e5a1f79ca4b6328526e0b"
+
+// renovate: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.3
+const frankenphpArm64 = "73bd5e8b82cb48e52c49ec124f1eba03bfa5608365c770372606ec4846fb929e"
+
 var frankenphpBuilds = []struct{ arch, asset, sha256 string }{
-	{"amd64", "x86_64", "f88db9972ddac5e4c097c8b703e585255e181411687e5a1f79ca4b6328526e0b"},
-	{"arm64", "aarch64", "73bd5e8b82cb48e52c49ec124f1eba03bfa5608365c770372606ec4846fb929e"},
+	{"amd64", "x86_64", frankenphpAmd64},
+	{"arm64", "aarch64", frankenphpArm64},
 }
 
-const composerImage = "composer:2.10.3"
+// renovate: datasource=docker depName=composer
+const composerVersion = "2.10.3"
 
 // frankenphp php-cli has no -d flag, and Composer passes -d settings to the scripts it runs.
 const phpWrapper = `#!/bin/sh
@@ -68,7 +78,7 @@ func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	var stages []Stage
 	for _, b := range frankenphpBuilds {
 		stages = append(stages, Stage{Name: "frankenphp-" + b.arch, From: "scratch", Steps: []Step{Add{
-			URL:        "https://github.com/php/frankenphp/releases/download/v" + frankenphpVersion + "/frankenphp-linux-" + b.asset,
+			URL:        "https://github.com/php/frankenphp/releases/download/" + frankenphpVersion + "/frankenphp-linux-" + b.asset,
 			SHA256:     b.sha256,
 			Dst:        "/frankenphp",
 			Executable: true,
@@ -84,7 +94,7 @@ func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.PHP.Composer {
 		cache := []string{"/root/.cache/composer"}
 		steps = append(steps,
-			Copy{From: composerImage, Src: []string{"/usr/bin/composer"}, Dst: "/usr/local/bin/composer"},
+			Copy{From: "composer:" + composerVersion, Src: []string{"/usr/bin/composer"}, Dst: "/usr/local/bin/composer"},
 			// Composer runs @php scripts with PHP_BINARY, which would otherwise be frankenphp itself.
 			Env{"PHP_BINARY", "/usr/local/bin/php"},
 			Env{"COMPOSER_ALLOW_SUPERUSER", "1"},

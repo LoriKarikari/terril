@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # renovate: datasource=github-releases depName=golangci/golangci-lint
+  GOLANGCI_LINT_VERSION: v2.15.0
+  # renovate: datasource=go depName=golang.org/x/vuln
+  GOVULNCHECK_VERSION: v1.9.0
+  # renovate: datasource=github-releases depName=wagoodman/dive
+  DIVE_VERSION: v0.13.1
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -37,8 +45,8 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.15.0
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+      - run: go run golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION ./...
       - name: Test app files are committed
         run: test -z "$(git ls-files --others --ignored --exclude-standard e2e/testdata | git check-ignore -v --stdin | grep '^.gitignore:' | grep -v node_modules)"
 
@@ -54,7 +62,7 @@ jobs:
           go-version-file: go.mod
       - name: Install dive
         run: |
-          curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
+          curl -fsSLo /tmp/dive.deb "https://github.com/wagoodman/dive/releases/download/$DIVE_VERSION/dive_${DIVE_VERSION#v}_linux_amd64.deb"
           sudo apt-get install -y /tmp/dive.deb
       - run: cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestApps .
       - if: failure()
@@ -76,6 +84,6 @@ jobs:
           go-version-file: go.mod
       - name: Install dive
         run: |
-          curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
+          curl -fsSLo /tmp/dive.deb "https://github.com/wagoodman/dive/releases/download/$DIVE_VERSION/dive_${DIVE_VERSION#v}_linux_amd64.deb"
           sudo apt-get install -y /tmp/dive.deb
       - run: cd e2e && go test -count=1 -timeout 60m -parallel 1 -run TestCache .

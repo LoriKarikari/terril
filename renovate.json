@@ -1,0 +1,100 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "minimumReleaseAge": "3 days",
+  "semanticCommits": "enabled",
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "ignorePaths": [
+    "e2e/testdata/**"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Versions of tools that terril puts in the Dockerfiles it writes",
+      "managerFilePatterns": [
+        "/^pack/.+\\.go$/"
+      ],
+      "matchStrings": [
+        "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+const \\w+ = \"(?<currentValue>[^\"]+)\"",
+        "// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) digestVersion=(?<currentValue>\\S+)\\s+const \\w+ = \"(?<currentDigest>[0-9a-f]{64})\""
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Lint and test tools in the justfile",
+      "managerFilePatterns": [
+        "/^justfile$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+ := \"[^\"]*@(?<currentValue>v[^\"]+)\""
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Tool versions in workflow env blocks",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Changes to the images terril writes show up in the release notes",
+      "matchFileNames": [
+        "pack/**"
+      ],
+      "semanticCommitType": "fix",
+      "semanticCommitScope": "images",
+      "groupName": "image tools"
+    },
+    {
+      "description": "FrankenPHP rebuilds its latest release nightly; a week-old release has usually been replaced and frozen",
+      "matchPackageNames": [
+        "php/frankenphp"
+      ],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "matchPackageNames": [
+        "github.com/golangci/golangci-lint/v2",
+        "golangci/golangci-lint"
+      ],
+      "groupName": "golangci-lint"
+    },
+    {
+      "description": "CI and lint tools stay out of the release notes",
+      "matchFileNames": [
+        "justfile",
+        ".github/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "CI tools",
+      "semanticCommitType": "ci"
+    },
+    {
+      "description": "Go modules are compiled into terril, so they stay fix(deps)",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "Go modules"
+    }
+  ]
+}
