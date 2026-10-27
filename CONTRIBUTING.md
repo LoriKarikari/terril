@@ -88,7 +88,7 @@ Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
 
 ## Releases
 
-[release-please](https://github.com/googleapis/release-please) keeps a release pull request open on `main`. Every merged `feat:`, `fix:` or `perf:` pull request adds to its `CHANGELOG.md` and bumps the version it proposes. Before 1.0, `feat:` bumps the minor version and `fix:` the patch version. The release workflow starts CI on the release pull request itself, because GitHub runs no workflows on pull requests that Actions opens. Merging the release pull request tags the release, and GoReleaser then builds `wolkpack` for Linux and macOS on amd64 and arm64 and attaches the archives and `checksums.txt` to it.
+[release-please](https://github.com/googleapis/release-please) keeps a release pull request open on `main`. Every merged `feat:`, `fix:` or `perf:` pull request adds to its `CHANGELOG.md` and bumps the version it proposes. Before 1.0, `feat:` bumps the minor version and `fix:` the patch version. CI on a pull request that Actions opens waits for approval, so the release workflow approves it. Merging the release pull request tags the release, and GoReleaser then builds `wolkpack` for Linux and macOS on amd64 and arm64 and attaches the archives and `checksums.txt` to it.
 
 ## Using AI tools
 
