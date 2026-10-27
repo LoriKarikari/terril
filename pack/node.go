@@ -316,7 +316,7 @@ func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok 
 		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
 			args = append([]string{"node", bin}, args[1:]...)
 			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote([]string{bin}) + ")\" in '#!'*node*) ;; *) " +
-				"echo " + shellQuote([]string{"wolkpack: " + bin + " isn't a Node script, so it can't run on distroless; set start in wolkpack.toml"}) + " >&2; exit 1;; esac"}
+				"echo " + shellQuote([]string{"terril: " + bin + " isn't a Node script, so it can't run on distroless; set start in terril.toml"}) + " >&2; exit 1;; esac"}
 		}
 		if args[0] != "node" || len(args) < 2 {
 			return "", nil, nil, nil, false

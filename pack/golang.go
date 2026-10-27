@@ -57,7 +57,7 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	} else {
 		steps = append(steps, Run{
 			Cmd: "cgo=$(CGO_ENABLED=1 go list -deps -f '{{if and .CgoFiles (not .Standard)}}{{.ImportPath}} {{end}}' " + pkg + ") && " +
-				`{ [ -z "$cgo" ] || { echo "wolkpack: this app needs cgo for $cgo, which wolkpack didn't detect. Please open an issue." >&2; exit 1; }; }`,
+				`{ [ -z "$cgo" ] || { echo "terril: this app needs cgo for $cgo, which terril didn't detect. Please open an issue." >&2; exit 1; }; }`,
 			Caches: caches,
 		})
 	}

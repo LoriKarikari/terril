@@ -24,9 +24,9 @@ import (
 )
 
 var (
-	wolkpack string
-	apps     = flag.String("apps", "", "comma-separated test apps to run (default: all)")
-	keep     = flag.Bool("keep", false, "keep the images after the run")
+	terril string
+	apps   = flag.String("apps", "", "comma-separated test apps to run (default: all)")
+	keep   = flag.Bool("keep", false, "keep the images after the run")
 )
 
 var results = struct {
@@ -39,13 +39,13 @@ var results = struct {
 
 func TestMain(m *testing.M) {
 	flag.Parse()
-	bin, err := os.MkdirTemp("", "wolkpack-e2e")
+	bin, err := os.MkdirTemp("", "terril-e2e")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	wolkpack = filepath.Join(bin, "wolkpack")
-	build := exec.Command("go", "build", "-o", wolkpack, "../cmd/wolkpack")
+	terril = filepath.Join(bin, "terril")
+	build := exec.Command("go", "build", "-o", terril, "../cmd/terril")
 	build.Stdout, build.Stderr = os.Stderr, os.Stderr
 	if err := build.Run(); err != nil {
 		os.Exit(1)
@@ -209,12 +209,12 @@ func (r *appResult) record(t *testing.T) {
 }
 
 func testApp(t *testing.T, f fixture, r *appResult) {
-	image := "wolkpack-e2e-" + f.name
+	image := "terril-e2e-" + f.name
 	log := newLog(t, f.name+".log")
 	keepUntilEnd(image)
 
 	if f.expectError != "" {
-		out, err := runCmd(log, wolkpack, "build", "-t", image, f.dir)
+		out, err := runCmd(log, terril, "build", "-t", image, f.dir)
 		switch {
 		case err == nil:
 			r.fail(t, "build succeeded but should have failed")
@@ -234,7 +234,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 			k, _, _ := strings.Cut(kv, "=")
 			stale = append(stale, "--env", k+"=stale-"+k)
 		}
-		if _, err := runCmd(log, wolkpack, append(append([]string{"build"}, stale...), "-t", image, f.dir)...); err != nil {
+		if _, err := runCmd(log, terril, append(append([]string{"build"}, stale...), "-t", image, f.dir)...); err != nil {
 			r.fail(t, "build failed, see %s", log.Name())
 			return
 		}
@@ -243,7 +243,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	for _, kv := range f.buildEnv {
 		args = append(args, "--env", kv)
 	}
-	if _, err := runCmd(log, wolkpack, append(args, "-t", image, f.dir)...); err != nil {
+	if _, err := runCmd(log, terril, append(args, "-t", image, f.dir)...); err != nil {
 		r.fail(t, "build failed, see %s", log.Name())
 		return
 	}
@@ -280,11 +280,11 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		return
 	}
 
-	plan, err := exec.Command(wolkpack, "plan", f.dir).Output()
+	plan, err := exec.Command(terril, "plan", f.dir).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m := regexp.MustCompile(`(?m)^# wolkpack: (.*)$`).FindSubmatch(plan); m != nil {
+	if m := regexp.MustCompile(`(?m)^# terril: (.*)$`).FindSubmatch(plan); m != nil {
 		r.provider = string(m[1])
 	}
 	user, err := exec.Command("docker", "image", "inspect", "-f", "{{.Config.User}}", image).Output()
@@ -539,7 +539,7 @@ func testCache(t *testing.T, f fixture) {
 		results.cache = append(results.cache, row)
 		results.Unlock()
 	}()
-	image := "wolkpack-cache-" + f.name
+	image := "terril-cache-" + f.name
 	keepUntilEnd(image)
 	work := t.TempDir()
 	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
@@ -547,10 +547,10 @@ func testCache(t *testing.T, f fixture) {
 	}
 	dir := filepath.Join(work, strings.TrimPrefix(f.dir, filepath.Join("testdata", f.name)))
 	log := newLog(t, f.name+".cache.log")
-	if _, err := runCmd(log, wolkpack, "build", "-t", image, dir); err != nil {
+	if _, err := runCmd(log, terril, "build", "-t", image, dir); err != nil {
 		t.Fatalf("first build failed, see %s", log.Name())
 	}
-	plan, err := exec.Command(wolkpack, "plan", f.dir).Output()
+	plan, err := exec.Command(terril, "plan", f.dir).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func testCache(t *testing.T, f fixture) {
 	var rerun []string
 	var secs float64
 	for i := range 2 {
-		if err := os.WriteFile(filepath.Join(dir, "wolkpack-cache-probe.txt"), []byte(fmt.Sprint(time.Now().UnixNano(), i)), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "terril-cache-probe.txt"), []byte(fmt.Sprint(time.Now().UnixNano(), i)), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := log.Truncate(0); err != nil {
@@ -579,7 +579,7 @@ func testCache(t *testing.T, f fixture) {
 			t.Fatal(err)
 		}
 		start := time.Now()
-		out, err := runCmd(log, wolkpack, "build", "-t", image, dir)
+		out, err := runCmd(log, terril, "build", "-t", image, dir)
 		secs = time.Since(start).Seconds()
 		if err != nil {
 			row[4] = "rebuild failed"

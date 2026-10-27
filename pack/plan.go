@@ -184,7 +184,7 @@ func aptInstall(packages []string) Run {
 func (p *Plan) Dockerfile() string {
 	var b strings.Builder
 	b.WriteString("# syntax=docker/dockerfile:1\n")
-	fmt.Fprintf(&b, "# wolkpack: %s\n", p.Summary())
+	fmt.Fprintf(&b, "# terril: %s\n", p.Summary())
 	all := append(slices.Clone(p.Stages), p.Runtime.stage())
 	if slices.ContainsFunc(all, func(s Stage) bool { return strings.Contains(s.From, "${TARGETARCH}") }) {
 		b.WriteString("\nARG TARGETARCH\n")
@@ -208,7 +208,7 @@ func (p *Plan) Dockerfile() string {
 }
 
 // BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.
-const BuildEnvArg = "WOLKPACK_BUILD_ENV"
+const BuildEnvArg = "TERRIL_BUILD_ENV"
 
 // Secret mounts don't invalidate Docker's cache, so BuildEnvArg goes in right after the source copy.
 func withBuildEnv(steps []Step, names []string) []Step {

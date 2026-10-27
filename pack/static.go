@@ -35,7 +35,7 @@ const caddyfile = `{
 
 func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 	if len(f.Config.Packages) > 0 {
-		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no apt; remove packages from wolkpack.toml")
+		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no apt; remove packages from terril.toml")
 	}
 	fallback := ""
 	if spa {

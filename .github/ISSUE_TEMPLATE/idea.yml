@@ -1,5 +1,5 @@
 name: Idea or feature request
-description: An app wolkpack could build, or a change to how it works.
+description: An app terril could build, or a change to how it works.
 labels: [enhancement]
 body:
   - type: markdown
@@ -9,7 +9,7 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: What app you're trying to build, and why wolkpack gets in the way today.
+      description: What app you're trying to build, and why terril gets in the way today.
     validations:
       required: true
   - type: textarea
@@ -22,4 +22,4 @@ body:
     attributes:
       label: Contract
       options:
-        - label: This would change CLI flags or `wolkpack.toml`.
+        - label: This would change CLI flags or `terril.toml`.
