@@ -31,10 +31,10 @@ var (
 
 var results = struct {
 	sync.Mutex
-	apps       [][]string
-	built      []string
-	images     int
-	pull, disk int64
+	apps, cache [][]string
+	built       []string
+	images      int
+	pull, disk  int64
 }{}
 
 func TestMain(m *testing.M) {
@@ -61,15 +61,15 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "e2e:", err)
 	}
 	for _, err := range []error{
-		writeTable("results.tsv", []string{"example", "status", "provider", "disk_mb", "pull_mb", "dive_eff", "dive_waste_mb", "rebuild_s", "user", "detail"}, results.apps),
+		writeTable("results.tsv", []string{"example", "status", "provider", "disk_mb", "pull_mb", "dive_eff", "dive_waste_mb", "user", "detail"}, results.apps),
+		writeTable("cache.tsv", []string{"example", "status", "rebuild_s", "steps_rerun", "deps_rerun"}, results.cache),
 	} {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "e2e:", err)
 			code = 1
 		}
 	}
-	// Removing an image while other apps still build makes Docker drop layers those builds
-	// share, and their rebuilds then miss the cache. So images go once every test is done.
+	// Images go once every test is done, so no build loses layers it shares with another.
 	if !*keep && len(results.built) > 0 {
 		if out, err := exec.Command("docker", append([]string{"rmi", "-f"}, results.built...)...).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "e2e: removing images: %v: %s\n", err, out)
@@ -174,8 +174,8 @@ func TestApps(t *testing.T) {
 }
 
 type appResult struct {
-	name, status, provider, disk, pull, eff, waste, rebuild, user, detail string
-	pullBytes, diskBytes                                                  int64
+	name, status, provider, disk, pull, eff, waste, user, detail string
+	pullBytes, diskBytes                                         int64
 }
 
 func (r *appResult) fail(t *testing.T, format string, args ...any) {
@@ -192,7 +192,7 @@ func (r *appResult) record(t *testing.T) {
 	default:
 		r.status = "PASS"
 	}
-	row := []string{r.name, r.status, r.provider, r.disk, r.pull, r.eff, r.waste, r.rebuild, r.user, r.detail}
+	row := []string{r.name, r.status, r.provider, r.disk, r.pull, r.eff, r.waste, r.user, r.detail}
 	for i, v := range row {
 		if v == "" {
 			row[i] = "-"
@@ -211,9 +211,7 @@ func (r *appResult) record(t *testing.T) {
 func testApp(t *testing.T, f fixture, r *appResult) {
 	image := "wolkpack-e2e-" + f.name
 	log := newLog(t, f.name+".log")
-	results.Lock()
-	results.built = append(results.built, image)
-	results.Unlock()
+	keepUntilEnd(image)
 
 	if f.expectError != "" {
 		out, err := runCmd(log, wolkpack, "build", "-t", image, f.dir)
@@ -312,10 +310,6 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		return
 	}
 	r.detail = "got: " + got
-	// The build-env test already rebuilds with other values, which reruns everything after the source copy.
-	if len(f.buildEnv) == 0 {
-		checkCache(t, f, image, plan, log, r)
-	}
 }
 
 func plantHostArtifacts(t *testing.T, dir string) {
@@ -517,6 +511,18 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 	return body, nil
 }
 
+func TestCache(t *testing.T) {
+	for _, f := range fixtures(t) {
+		if f.expectError != "" || len(f.buildEnv) > 0 {
+			continue
+		}
+		t.Run(f.name, func(t *testing.T) {
+			t.Parallel()
+			testCache(t, f)
+		})
+	}
+}
+
 var (
 	installRe = regexp.MustCompile(`install|uv sync|npm ci|go mod download`)
 	// Tool setup, and production prunes that run after the build, aren't the dependency install.
@@ -526,29 +532,45 @@ var (
 	cachedRe     = regexp.MustCompile(`^#(\d+) CACHED`)
 )
 
-// checkCache adds a source file and rebuilds. The first dependency install in the plan must
-// come from Docker's cache.
-func checkCache(t *testing.T, f fixture, image string, plan []byte, log *os.File, r *appResult) {
-	probe := filepath.Join(f.dir, "wolkpack-cache-probe.txt")
-	t.Cleanup(func() {
-		if err := os.Remove(probe); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Error(err)
-		}
-	})
+func testCache(t *testing.T, f fixture) {
+	row := []string{f.name, "FAIL", "-", "-", "first build failed"}
+	defer func() {
+		results.Lock()
+		results.cache = append(results.cache, row)
+		results.Unlock()
+	}()
+	image := "wolkpack-cache-" + f.name
+	keepUntilEnd(image)
+	work := t.TempDir()
+	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(work, strings.TrimPrefix(f.dir, filepath.Join("testdata", f.name)))
+	log := newLog(t, f.name+".cache.log")
+	if _, err := runCmd(log, wolkpack, "build", "-t", image, dir); err != nil {
+		t.Fatalf("first build failed, see %s", log.Name())
+	}
 	// A fully cached build never touches the steps before a stage's last one, so a size-limited
 	// prune can drop them. The first rebuild restores them; the second is the one that's checked.
 	var out string
+	var secs float64
 	for i := range 2 {
-		if err := os.WriteFile(probe, []byte(fmt.Sprint(time.Now().UnixNano(), i)), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "wolkpack-cache-probe.txt"), []byte(fmt.Sprint(time.Now().UnixNano(), i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Truncate(0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := log.Seek(0, io.SeekStart); err != nil {
 			t.Fatal(err)
 		}
 		start := time.Now()
 		var err error
-		out, err = runCmd(log, wolkpack, "build", "-t", image, f.dir)
-		r.rebuild = fmt.Sprintf("%.1f", time.Since(start).Seconds())
+		out, err = runCmd(log, wolkpack, "build", "-t", image, dir)
+		secs = time.Since(start).Seconds()
 		if err != nil {
-			r.fail(t, "rebuild after a source edit failed, see %s", log.Name())
-			return
+			row[4] = "rebuild failed"
+			t.Fatalf("rebuild failed, see %s", log.Name())
 		}
 	}
 
@@ -560,17 +582,29 @@ func checkCache(t *testing.T, f fixture, image string, plan []byte, log *os.File
 			cached[m[1]] = true
 		}
 	}
+	var rerun []string
+	for id, cmd := range steps {
+		if !cached[id] && !slices.Contains(rerun, cmd) {
+			rerun = append(rerun, cmd)
+		}
+	}
+
+	plan, err := exec.Command(wolkpack, "plan", f.dir).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := ""
 	for _, line := range strings.Split(string(plan), "\n") {
 		cmd, ok := strings.CutPrefix(line, "RUN ")
-		if cmd = mountsRe.ReplaceAllString(cmd, ""); !ok || !installRe.MatchString(cmd) || notInstallRe.MatchString(cmd) {
-			continue
+		if cmd = mountsRe.ReplaceAllString(cmd, ""); ok && installRe.MatchString(cmd) && !notInstallRe.MatchString(cmd) {
+			first = cmd
+			break
 		}
-		for id, step := range steps {
-			if step == cmd && !cached[id] {
-				r.fail(t, "a source edit reran the dependency install: %s", cmd)
-			}
-		}
-		return
+	}
+	row = []string{f.name, "PASS", fmt.Sprintf("%.1f", secs), fmt.Sprint(len(rerun)), "-"}
+	if first != "" && slices.Contains(rerun, first) {
+		row[1], row[4] = "FAIL", first
+		t.Errorf("a source edit reran the dependency install: %s", first)
 	}
 }
 
@@ -588,6 +622,12 @@ func newLog(t *testing.T, name string) *os.File {
 		}
 	})
 	return log
+}
+
+func keepUntilEnd(image string) {
+	results.Lock()
+	results.built = append(results.built, image)
+	results.Unlock()
 }
 
 // docker runs a cleanup command. A failure is logged, not fatal, so the remaining cleanups still run.

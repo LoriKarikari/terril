@@ -52,22 +52,11 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # The runner's Docker uses the overlay2 image store. Under parallel builds that share a base
-      # image, it reran cached steps; the containerd store, Docker's default since 29, doesn't.
-      - name: Use the containerd image store
-        run: |
-          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-          docker info -f '{{.Driver}} {{json .DriverStatus}}'
       - name: Install dive
         run: |
           curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
           sudo apt-get install -y /tmp/dive.deb
       - run: cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestApps .
-      - if: always()
-        run: |
-          df -h /
-          docker system df
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -75,3 +64,18 @@ jobs:
           path: |
             e2e/results.tsv
             e2e/logs/
+
+  cache:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install dive
+        run: |
+          curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
+          sudo apt-get install -y /tmp/dive.deb
+      - run: cd e2e && go test -count=1 -timeout 60m -parallel 1 -run TestCache .

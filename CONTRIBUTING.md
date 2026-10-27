@@ -64,7 +64,7 @@ just test
 just test python-flask node-pnpm
 ```
 
-The run prints a table and writes it to `e2e/results.tsv`, with each image's size on disk, its compressed pull size, dive's efficiency and wasted bytes, the rebuild time after a source edit, and its user. A test fails if the image runs as root, or if dive's efficiency score is below 95%, which means files are duplicated or deleted across layers. Build logs go to `e2e/logs/`.
+The run prints a table and writes it to `e2e/results.tsv`, with each image's size on disk, its compressed pull size, dive's efficiency and wasted bytes, and its user. A test fails if the image runs as root, or if dive's efficiency score is below 95%, which means files are duplicated or deleted across layers. Build logs go to `e2e/logs/`.
 
 Apps build four at a time. Each test removes its images when it ends, even when it fails, and the run trims Docker's build cache to 10 GB at the end. Pass `-keep` to `go test` to keep the images.
 
@@ -85,7 +85,7 @@ Before each build, the test adds a `node_modules` and a `__pycache__` folder to 
 
 Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
 
-After an app passes, the test adds a source file and rebuilds it. It fails if the rebuild reruns the dependency install, and records the rebuild time in `e2e/results.tsv`.
+`just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. It builds one app at a time, because parallel builds that share steps can miss Docker's cache. CI runs it on every pull request that changes code.
 
 ## Releases
 
