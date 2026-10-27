@@ -40,6 +40,7 @@ Thanks for wanting to help. This page says which changes wolkpack accepts and ho
 Use `<type>(<scope>): <summary>`, in lowercase and the imperative mood, with no period at the end.
 
 - **Types.** `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, and `chore`.
+- **CI changes.** Use `ci`, even for a fix. `feat`, `fix` and `perf` are for changes users of wolkpack notice, and they go into the release notes.
 - **Scopes.** Optional. Use the language or area the change touches, such as `node`, `python`, `go`, `static`, `config`, or `plan`.
 - **Breaking changes.** Add `!` after the type or scope, and explain the break in a `BREAKING CHANGE:` footer. Anything that changes CLI flags or `wolkpack.toml` in an incompatible way counts.
 
