@@ -32,6 +32,7 @@ var (
 var results = struct {
 	sync.Mutex
 	apps, cache [][]string
+	built       []string
 	images      int
 	pull, disk  int64
 }{}
@@ -66,6 +67,12 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "e2e:", err)
 			code = 1
+		}
+	}
+	// Images go once every test is done, so no build loses layers it shares with another.
+	if !*keep && len(results.built) > 0 {
+		if out, err := exec.Command("docker", append([]string{"rmi", "-f"}, results.built...)...).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "e2e: removing images: %v: %s\n", err, out)
 		}
 	}
 	if results.images > 0 {
@@ -204,9 +211,7 @@ func (r *appResult) record(t *testing.T) {
 func testApp(t *testing.T, f fixture, r *appResult) {
 	image := "wolkpack-e2e-" + f.name
 	log := newLog(t, f.name+".log")
-	if !*keep {
-		t.Cleanup(func() { docker(t, "rmi", "-f", image) })
-	}
+	keepUntilEnd(image)
 
 	if f.expectError != "" {
 		out, err := runCmd(log, wolkpack, "build", "-t", image, f.dir)
@@ -535,9 +540,7 @@ func testCache(t *testing.T, f fixture) {
 		results.Unlock()
 	}()
 	image := "wolkpack-cache-" + f.name
-	if !*keep {
-		t.Cleanup(func() { docker(t, "rmi", "-f", image) })
-	}
+	keepUntilEnd(image)
 	work := t.TempDir()
 	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
 		t.Fatal(err)
@@ -547,38 +550,6 @@ func testCache(t *testing.T, f fixture) {
 	if _, err := runCmd(log, wolkpack, "build", "-t", image, dir); err != nil {
 		t.Fatalf("first build failed, see %s", log.Name())
 	}
-	if err := os.WriteFile(filepath.Join(dir, "wolkpack-cache-probe.txt"), []byte(time.Now().String()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := log.Truncate(0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := log.Seek(0, io.SeekStart); err != nil {
-		t.Fatal(err)
-	}
-	start := time.Now()
-	out, err := runCmd(log, wolkpack, "build", "-t", image, dir)
-	secs := time.Since(start).Seconds()
-	if err != nil {
-		row[4] = "rebuild failed"
-		t.Fatalf("rebuild failed, see %s", log.Name())
-	}
-
-	steps, cached := map[string]string{}, map[string]bool{}
-	for _, line := range strings.Split(out, "\n") {
-		if m := runStepRe.FindStringSubmatch(line); m != nil {
-			steps[m[1]] = mountsRe.ReplaceAllString(m[2], "")
-		} else if m := cachedRe.FindStringSubmatch(line); m != nil {
-			cached[m[1]] = true
-		}
-	}
-	var rerun []string
-	for id, cmd := range steps {
-		if !cached[id] && !slices.Contains(rerun, cmd) {
-			rerun = append(rerun, cmd)
-		}
-	}
-
 	plan, err := exec.Command(wolkpack, "plan", f.dir).Output()
 	if err != nil {
 		t.Fatal(err)
@@ -588,6 +559,34 @@ func testCache(t *testing.T, f fixture) {
 		cmd, ok := strings.CutPrefix(line, "RUN ")
 		if cmd = mountsRe.ReplaceAllString(cmd, ""); ok && installRe.MatchString(cmd) && !notInstallRe.MatchString(cmd) {
 			first = cmd
+			break
+		}
+	}
+
+	// A fully cached build never touches the steps before a stage's last one, so a size-limited
+	// prune can drop them. If the install reran, a second rebuild shows whether the Dockerfile
+	// itself keeps it cached.
+	var rerun []string
+	var secs float64
+	for i := range 2 {
+		if err := os.WriteFile(filepath.Join(dir, "wolkpack-cache-probe.txt"), []byte(fmt.Sprint(time.Now().UnixNano(), i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Truncate(0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := log.Seek(0, io.SeekStart); err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		out, err := runCmd(log, wolkpack, "build", "-t", image, dir)
+		secs = time.Since(start).Seconds()
+		if err != nil {
+			row[4] = "rebuild failed"
+			t.Fatalf("rebuild failed, see %s", log.Name())
+		}
+		rerun = rerunSteps(out)
+		if first == "" || !slices.Contains(rerun, first) {
 			break
 		}
 	}
@@ -612,6 +611,31 @@ func newLog(t *testing.T, name string) *os.File {
 		}
 	})
 	return log
+}
+
+// rerunSteps lists the RUN commands BuildKit ran instead of taking from its cache.
+func rerunSteps(out string) []string {
+	steps, cached := map[string]string{}, map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if m := runStepRe.FindStringSubmatch(line); m != nil {
+			steps[m[1]] = mountsRe.ReplaceAllString(m[2], "")
+		} else if m := cachedRe.FindStringSubmatch(line); m != nil {
+			cached[m[1]] = true
+		}
+	}
+	var rerun []string
+	for id, cmd := range steps {
+		if !cached[id] && !slices.Contains(rerun, cmd) {
+			rerun = append(rerun, cmd)
+		}
+	}
+	return rerun
+}
+
+func keepUntilEnd(image string) {
+	results.Lock()
+	results.built = append(results.built, image)
+	results.Unlock()
 }
 
 // docker runs a cleanup command. A failure is logged, not fatal, so the remaining cleanups still run.

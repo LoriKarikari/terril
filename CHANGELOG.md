@@ -22,8 +22,6 @@
 
 ### Fixes
 
-* **ci:** approve CI on the release pull request instead of dispatching it ([#28](https://github.com/LoriKarikari/wolkpack/issues/28)) ([d075cd3](https://github.com/LoriKarikari/wolkpack/commit/d075cd32757a33ad895cda2d01f942d27db87d00))
-* **ci:** read the release branch from the pr output in the shell ([#26](https://github.com/LoriKarikari/wolkpack/issues/26)) ([2de3a09](https://github.com/LoriKarikari/wolkpack/commit/2de3a09c48dfc83abef0b29a1a205885ae197551))
 * **node:** build and prune Yarn, Bun and plain npm workspaces ([#7](https://github.com/LoriKarikari/wolkpack/issues/7)) ([d5e339d](https://github.com/LoriKarikari/wolkpack/commit/d5e339d0d77db5b4540c868554b482748ea2cbd2))
 * **node:** prune workspace builds to the app's production dependencies ([#6](https://github.com/LoriKarikari/wolkpack/issues/6)) ([af9a524](https://github.com/LoriKarikari/wolkpack/commit/af9a5246693e6e110226fbbb1015d650ef4890a4))
 * **php:** pin FrankenPHP 1.13.3's frozen binaries ([#25](https://github.com/LoriKarikari/wolkpack/issues/25)) ([84e0796](https://github.com/LoriKarikari/wolkpack/commit/84e079603b49ccbf8e7e18ece4145d9d53221a10))
