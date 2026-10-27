@@ -35,11 +35,14 @@ type nodeManager struct {
 	workspacePrune func(install, pkg string) string
 }
 
+// renovate: datasource=npm depName=corepack
+const corepackVersion = "0.36.0"
+
 var corepackYarn = func(*Node) []Step {
 	return []Step{
 		Env{"COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"},
 		Env{"COREPACK_ENABLE_AUTO_PIN", "0"},
-		Run{Cmd: "npm install -g --force corepack@0.36.0 && corepack enable yarn", Caches: []string{"/root/.npm"}},
+		Run{Cmd: "npm install -g --force corepack@" + corepackVersion + " && corepack enable yarn", Caches: []string{"/root/.npm"}},
 	}
 }
 

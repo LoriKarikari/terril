@@ -24,7 +24,7 @@ terril is an open-source CLI that builds a container image from a Node, Python o
 - When two answers are equally likely, fail with an error that names both. Never pick one by list order.
 - Images run as UID 1000. A change that makes any image run as root is wrong.
 - Images contain only what the app needs at runtime. No dev dependencies, no host `node_modules` or `__pycache__`, no build tools.
-- Pin every tool version terril installs, such as uv, Poetry and corepack.
+- Pin every tool version terril installs, such as uv, Poetry and corepack. Put each version in its own `const` with a `// renovate: datasource=... depName=...` comment above it, so Renovate keeps it current.
 - Every change gets an end-to-end test app in `e2e/testdata/` that fails without the change. Don't write unit tests.
 - Title changes to CI, tests or tooling `ci:`, `test:` or `chore:`, never `fix(ci):`. `feat`, `fix` and `perf` titles go into the release notes.
 - Write a comment only when the code can't show why it's written that way. Never narrate what the code does.

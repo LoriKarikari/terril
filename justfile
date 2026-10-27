@@ -1,4 +1,7 @@
+# renovate: datasource=go depName=github.com/golangci/golangci-lint/v2
 golangci := "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0"
+# renovate: datasource=go depName=golang.org/x/vuln
+govulncheck := "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0"
 
 default:
     @just --list
@@ -22,6 +25,6 @@ fmt:
 
 lint:
     {{golangci}} run ./...
-    go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+    {{govulncheck}} ./...
     # A rule in the root .gitignore must not drop test app files; CI only sees committed ones.
     test -z "$(git ls-files --others --ignored --exclude-standard e2e/testdata | git check-ignore -v --stdin | grep '^.gitignore:' | grep -v node_modules)"

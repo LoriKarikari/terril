@@ -22,6 +22,12 @@ const venv = "/app/.venv"
 
 const pythonDir = "/python"
 
+// renovate: datasource=docker depName=ghcr.io/astral-sh/uv
+const uvVersion = "0.13.5"
+
+// renovate: datasource=pypi depName=poetry
+const poetryVersion = "2.5.1"
+
 // Parts of uv's Python a server never uses. The bin/python3.x executable embeds the
 // interpreter, so libpython is only for programs that embed Python themselves.
 var pythonRuntimeExcludes = []string{
@@ -56,7 +62,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	uvCache := []string{"/root/.cache/uv"}
 	steps := []Step{
 		venvPath,
-		Copy{From: "ghcr.io/astral-sh/uv:0.13.5", Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
+		Copy{From: "ghcr.io/astral-sh/uv:" + uvVersion, Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
 		Env{"UV_PYTHON", v},
 		Env{"UV_PROJECT_ENVIRONMENT", venv},
 		Env{"VIRTUAL_ENV", venv},
@@ -116,7 +122,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		steps = append(steps,
 			Run{Cmd: "uv venv " + venv},
 			Env{"UV_TOOL_BIN_DIR", "/usr/local/bin"},
-			Run{Cmd: "uv tool install poetry==2.5.1", Caches: uvCache},
+			Run{Cmd: "uv tool install poetry==" + poetryVersion, Caches: uvCache},
 			Env{"POETRY_VIRTUALENVS_IN_PROJECT", "true"},
 			Env{"POETRY_NO_INTERACTION", "1"},
 			Copy{Src: []string{"pyproject.toml", "poetry.lock"}, Dst: "./"},
