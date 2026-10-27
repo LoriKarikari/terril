@@ -7,6 +7,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   release-please:
@@ -15,12 +16,15 @@ jobs:
       created: ${{ steps.release.outputs.release_created }}
       tag: ${{ steps.release.outputs.tag_name }}
     steps:
-      # GitHub runs no workflows for pull requests made with GITHUB_TOKEN, so the release
-      # pull request would never get the checks main requires.
       - id: release
         uses: googleapis/release-please-action@v5
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      # A pull request made with GITHUB_TOKEN starts no workflows, so main's required checks would
+      # never report on it. A workflow_dispatch made with GITHUB_TOKEN does start one.
+      - if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: gh workflow run e2e.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
 
   goreleaser:
     needs: release-please
