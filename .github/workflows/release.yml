@@ -18,13 +18,22 @@ jobs:
     steps:
       - id: release
         uses: googleapis/release-please-action@v5
-      # A pull request made with GITHUB_TOKEN starts no workflows, so main's required checks would
-      # never report on it. A workflow_dispatch made with GITHUB_TOKEN does start one.
+      # CI on a pull request opened by github-actions waits for approval, and main requires it.
       - if: steps.release.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.release.outputs.pr }}
-        run: gh workflow run e2e.yml --repo "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
+        run: |
+          branch=$(jq -r .headBranchName <<<"$PR")
+          ids=""
+          for _ in $(seq 1 12); do
+            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$branch" --event pull_request --status action_required --json databaseId -q '.[].databaseId')
+            [ -n "$ids" ] && break
+            sleep 5
+          done
+          for id in $ids; do
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
+          done
 
   goreleaser:
     needs: release-please
