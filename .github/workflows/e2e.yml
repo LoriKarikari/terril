@@ -52,12 +52,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Docker setup (diagnostic)
+      # The runner's Docker uses the overlay2 image store. Under parallel builds that share a base
+      # image, it reran cached steps; the containerd store, Docker's default since 29, doesn't.
+      - name: Use the containerd image store
         run: |
-          docker version --format 'server {{.Server.Version}}'
-          docker info --format 'driver={{.Driver}} {{json .DriverStatus}}'
-          cat /etc/docker/daemon.json || true
-          docker buildx inspect | sed -n '/GC Policy/,$p'
+          echo '{"features":{"containerd-snapshotter":true}}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info -f '{{.Driver}} {{json .DriverStatus}}'
       - name: Install dive
         run: |
           curl -fsSLo /tmp/dive.deb https://github.com/wagoodman/dive/releases/download/v0.13.1/dive_0.13.1_linux_amd64.deb
