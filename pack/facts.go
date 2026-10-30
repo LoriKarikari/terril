@@ -3,6 +3,7 @@ package pack
 import (
 	"bufio"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path"
@@ -25,6 +26,7 @@ type Facts struct {
 	Python      *Python
 	Ruby        *Ruby
 	PHP         *PHP
+	DotNet      *DotNet
 	Go          *modfile.File
 	GoCgo       bool
 	Config      Config
@@ -93,6 +95,20 @@ type PHP struct {
 	DocRoot string
 }
 
+type DotNet struct {
+	// The project to publish, relative to the app.
+	Project string
+	// Every project file, relative to the app, so restore sees the projects it references.
+	Projects        []string
+	Assembly        string
+	TargetFramework string
+	Web             bool
+	// The project turns off culture data, so the runtime can leave ICU out.
+	Invariant bool
+	// From global.json, when it pins one.
+	SDKVersion string
+}
+
 type Ruby struct {
 	Version string
 	// Gem names from Gemfile.lock, including dependencies of dependencies.
@@ -156,6 +172,9 @@ func Read(dir string) (*Facts, error) {
 		return nil, err
 	}
 	if f.PHP, err = readPHP(f); err != nil {
+		return nil, err
+	}
+	if f.DotNet, err = readDotNet(f); err != nil {
 		return nil, err
 	}
 	if f.Python != nil && f.Workspace == nil {
@@ -687,4 +706,105 @@ func procfileWeb(s string) string {
 		}
 	}
 	return ""
+}
+
+type csproj struct {
+	SDK    string `xml:"Sdk,attr"`
+	Groups []struct {
+		TargetFramework        string `xml:"TargetFramework"`
+		TargetFrameworks       string `xml:"TargetFrameworks"`
+		AssemblyName           string `xml:"AssemblyName"`
+		InvariantGlobalization string `xml:"InvariantGlobalization"`
+	} `xml:"PropertyGroup"`
+}
+
+func readDotNet(f *Facts) (*DotNet, error) {
+	var projects []string
+	err := filepath.WalkDir(f.Dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && p != f.Dir && (d.Name() == "bin" || d.Name() == "obj" || d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".")) {
+			return filepath.SkipDir
+		}
+		if strings.HasSuffix(d.Name(), ".csproj") {
+			rel, _ := filepath.Rel(f.Dir, p)
+			projects = append(projects, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil || len(projects) == 0 {
+		return nil, err
+	}
+	slices.Sort(projects)
+
+	parsed := map[string]csproj{}
+	var web []string
+	for _, p := range projects {
+		s, _ := f.read(p)
+		var c csproj
+		if err := xml.Unmarshal([]byte(s), &c); err != nil {
+			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+		parsed[p] = c
+		if c.SDK == "Microsoft.NET.Sdk.Web" {
+			web = append(web, p)
+		}
+	}
+	// The project at the app root wins. Otherwise the only web project does, so a solution with
+	// one API and its test projects builds the API.
+	var project string
+	for _, p := range projects {
+		if !strings.Contains(p, "/") {
+			if project != "" {
+				return nil, fmt.Errorf("several .NET projects at the app root (%s); keep one", strings.Join(projects, ", "))
+			}
+			project = p
+		}
+	}
+	switch {
+	case project != "":
+	case len(web) == 1:
+		project = web[0]
+	case len(web) > 1:
+		return nil, fmt.Errorf("several .NET web projects (%s); point terril at the folder of the one to build", strings.Join(web, ", "))
+	case len(projects) == 1:
+		project = projects[0]
+	default:
+		return nil, fmt.Errorf("several .NET projects (%s); point terril at the folder of the one to build", strings.Join(projects, ", "))
+	}
+
+	c := parsed[project]
+	d := &DotNet{
+		Project:  project,
+		Projects: projects,
+		Assembly: strings.TrimSuffix(path.Base(project), ".csproj"),
+		Web:      c.SDK == "Microsoft.NET.Sdk.Web",
+	}
+	for _, g := range c.Groups {
+		if g.AssemblyName != "" {
+			d.Assembly = g.AssemblyName
+		}
+		if strings.EqualFold(g.InvariantGlobalization, "true") {
+			d.Invariant = true
+		}
+		if g.TargetFramework != "" {
+			d.TargetFramework = g.TargetFramework
+		} else if g.TargetFrameworks != "" && d.TargetFramework == "" {
+			frameworks := strings.Split(g.TargetFrameworks, ";")
+			d.TargetFramework = strings.TrimSpace(frameworks[len(frameworks)-1])
+		}
+	}
+	if s, ok := f.read("global.json"); ok {
+		var g struct {
+			SDK struct {
+				Version string `json:"version"`
+			} `json:"sdk"`
+		}
+		if err := json.Unmarshal([]byte(s), &g); err != nil {
+			return nil, fmt.Errorf("global.json: %w", err)
+		}
+		d.SDKVersion = g.SDK.Version
+	}
+	return d, nil
 }
