@@ -27,6 +27,7 @@ type Facts struct {
 	Ruby        *Ruby
 	PHP         *PHP
 	DotNet      *DotNet
+	Rust        *Rust
 	Go          *modfile.File
 	GoCgo       bool
 	Config      Config
@@ -109,6 +110,13 @@ type DotNet struct {
 	SDKVersion string
 }
 
+type Rust struct {
+	Package string
+	Bin     string
+	// The channel from rust-toolchain.toml, when it pins a version.
+	Version string
+}
+
 type Ruby struct {
 	Version string
 	// Gem names from Gemfile.lock, including dependencies of dependencies.
@@ -175,6 +183,9 @@ func Read(dir string) (*Facts, error) {
 		return nil, err
 	}
 	if f.DotNet, err = readDotNet(f); err != nil {
+		return nil, err
+	}
+	if f.Rust, err = readRust(f); err != nil {
 		return nil, err
 	}
 	if f.Python != nil && f.Workspace == nil {
@@ -807,4 +818,109 @@ func readDotNet(f *Facts) (*DotNet, error) {
 		d.SDKVersion = g.SDK.Version
 	}
 	return d, nil
+}
+
+type cargoToml struct {
+	Package *struct {
+		Name       string `toml:"name"`
+		DefaultRun string `toml:"default-run"`
+		Autobins   *bool  `toml:"autobins"`
+	} `toml:"package"`
+	Bin []struct {
+		Name string `toml:"name"`
+	} `toml:"bin"`
+	Workspace *struct {
+		Members []string `toml:"members"`
+	} `toml:"workspace"`
+}
+
+func readRust(f *Facts) (*Rust, error) {
+	root, ok := f.read("Cargo.toml")
+	if !ok {
+		return nil, nil
+	}
+	if !f.Has("Cargo.lock") {
+		return nil, fmt.Errorf("no Cargo.lock next to Cargo.toml; run cargo generate-lockfile and commit it")
+	}
+	var manifest cargoToml
+	if _, err := toml.Decode(root, &manifest); err != nil {
+		return nil, fmt.Errorf("reading Cargo.toml: %w", err)
+	}
+	dirs := []string{"."}
+	if manifest.Workspace != nil {
+		for _, pattern := range manifest.Workspace.Members {
+			matches, _ := filepath.Glob(filepath.Join(f.Dir, pattern, "Cargo.toml"))
+			for _, m := range matches {
+				rel, _ := filepath.Rel(f.Dir, filepath.Dir(m))
+				dirs = append(dirs, filepath.ToSlash(rel))
+			}
+		}
+	}
+
+	type bin struct{ pkg, name string }
+	var bins []bin
+	for _, dir := range dirs {
+		var c cargoToml
+		if dir == "." {
+			c = manifest
+		} else {
+			s, _ := f.read(path.Join(dir, "Cargo.toml"))
+			if _, err := toml.Decode(s, &c); err != nil {
+				return nil, fmt.Errorf("%s/Cargo.toml: %w", dir, err)
+			}
+		}
+		if c.Package == nil {
+			continue
+		}
+		names := map[string]bool{}
+		for _, b := range c.Bin {
+			names[b.Name] = true
+		}
+		// Cargo finds binaries in src/main.rs and src/bin/ unless autobins is off.
+		if c.Package.Autobins == nil || *c.Package.Autobins {
+			if f.Has(path.Join(dir, "src/main.rs")) {
+				names[c.Package.Name] = true
+			}
+			entries, _ := os.ReadDir(filepath.Join(f.Dir, dir, "src/bin"))
+			for _, e := range entries {
+				if name, ok := strings.CutSuffix(e.Name(), ".rs"); ok && !e.IsDir() {
+					names[name] = true
+				} else if e.IsDir() && f.Has(path.Join(dir, "src/bin", e.Name(), "main.rs")) {
+					names[e.Name()] = true
+				}
+			}
+		}
+		if dir == "." && c.Package.DefaultRun != "" {
+			return &Rust{Package: c.Package.Name, Bin: c.Package.DefaultRun, Version: rustToolchain(f)}, nil
+		}
+		for name := range names {
+			bins = append(bins, bin{c.Package.Name, name})
+		}
+	}
+	switch len(bins) {
+	case 0:
+		return nil, fmt.Errorf("no Rust binary: add src/main.rs or a [[bin]] to Cargo.toml")
+	case 1:
+		return &Rust{Package: bins[0].pkg, Bin: bins[0].name, Version: rustToolchain(f)}, nil
+	}
+	var names []string
+	for _, b := range bins {
+		names = append(names, b.name)
+	}
+	slices.Sort(names)
+	return nil, fmt.Errorf("several Rust binaries (%s); set default-run in Cargo.toml", strings.Join(names, ", "))
+}
+
+func rustToolchain(f *Facts) string {
+	if s, ok := f.read("rust-toolchain.toml"); ok {
+		var t struct {
+			Toolchain struct {
+				Channel string `toml:"channel"`
+			} `toml:"toolchain"`
+		}
+		if _, err := toml.Decode(s, &t); err == nil {
+			return t.Toolchain.Channel
+		}
+	}
+	return f.firstLine("rust-toolchain")
 }

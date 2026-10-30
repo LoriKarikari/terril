@@ -20,7 +20,7 @@ type provider struct {
 	assetStage func(f *Facts, name string) (Stage, error)
 }
 
-var providers = []provider{goProvider, pythonProvider, rubyProvider, phpProvider, dotnetProvider, nodeProvider, staticProvider}
+var providers = []provider{goProvider, rustProvider, pythonProvider, rubyProvider, phpProvider, dotnetProvider, nodeProvider, staticProvider}
 
 func New(f *Facts, forceProvider string) (*Plan, error) {
 	roles := map[string]Role{}
@@ -108,7 +108,7 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 
 	switch len(candidates) {
 	case 0:
-		return provider{}, fmt.Errorf("no package.json, requirements.txt, pyproject.toml, Gemfile, composer.json, index.php, *.csproj, go.mod or index.html found; don't know how to build this app")
+		return provider{}, fmt.Errorf("no package.json, requirements.txt, pyproject.toml, Gemfile, composer.json, index.php, *.csproj, Cargo.toml, go.mod or index.html found; don't know how to build this app")
 	case 1:
 		return candidates[0], nil
 	}
