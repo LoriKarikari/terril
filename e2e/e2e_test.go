@@ -524,7 +524,7 @@ func TestCache(t *testing.T) {
 }
 
 var (
-	installRe = regexp.MustCompile(`install|uv sync|npm ci|go mod download`)
+	installRe = regexp.MustCompile(`install|uv sync|npm ci|go mod download|dotnet restore|cargo chef cook`)
 	// Tool setup, and production prunes that run after the build, aren't the dependency install.
 	notInstallRe = regexp.MustCompile(`apt-get|install -g|python install|tool install|prune|--prod|--production|--omit=dev`)
 	mountsRe     = regexp.MustCompile(`^(--mount=\S+ )*`)
