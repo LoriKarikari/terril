@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.0](https://github.com/LoriKarikari/terril/compare/v0.1.0...v0.2.0) (2026-10-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename wolkpack to terril ([#30](https://github.com/LoriKarikari/terril/issues/30))
+
+### Features
+
+* **dotnet:** build ASP.NET Core and console apps ([#35](https://github.com/LoriKarikari/terril/issues/35)) ([8e58741](https://github.com/LoriKarikari/terril/commit/8e58741fed093618bfc0ffd7dbc135027e4aa886))
+* refuse runtimes past their end of life, after a warning ([#38](https://github.com/LoriKarikari/terril/issues/38)) ([7d8f138](https://github.com/LoriKarikari/terril/commit/7d8f13886cecc2df1995b240af3ee3e73518d3e3))
+* rename wolkpack to terril ([#30](https://github.com/LoriKarikari/terril/issues/30)) ([2ebfc50](https://github.com/LoriKarikari/terril/commit/2ebfc502a44d0ce8cdb7e89f618c90a952536b0d))
+* **rust:** build Rust binaries with cargo-chef ([#36](https://github.com/LoriKarikari/terril/issues/36)) ([8a98b77](https://github.com/LoriKarikari/terril/commit/8a98b7724b55ac9b65917c0a7592d9b386d68c62))
+
+
+### Fixes
+
+* **node:** build exact Node versions on the newest release of their line ([#39](https://github.com/LoriKarikari/terril/issues/39)) ([60e27df](https://github.com/LoriKarikari/terril/commit/60e27dfa2407f84fb768e26e3ad727a3255efc22))
+* **rust:** install the toolchain file's Rust with rustup ([#40](https://github.com/LoriKarikari/terril/issues/40)) ([e6c25a8](https://github.com/LoriKarikari/terril/commit/e6c25a8a16613b92b3e2691bfc996c5939463f95))
+
 ## 0.1.0 (2026-10-27)
 
 
