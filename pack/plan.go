@@ -21,7 +21,19 @@ type Plan struct {
 	Runtime  Runtime
 	// Names of variables the build steps read. Their values never reach the image.
 	BuildEnv []string
-	Warnings []string
+	Warnings []Warning
+}
+
+// Treat a Kind you don't know as a plain warning. terril may add kinds in any release.
+type WarningKind string
+
+// RuntimeEndOfLife warns that the runtime the image ships, such as Node 22, is near or past its
+// end of life, and names the day terril stops building it.
+const RuntimeEndOfLife WarningKind = "runtime_end_of_life"
+
+type Warning struct {
+	Kind    WarningKind
+	Message string
 }
 
 type Runtime struct {

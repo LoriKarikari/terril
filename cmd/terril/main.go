@@ -84,7 +84,7 @@ func run(cmd, dir, provider, tag string, env *envFlags) error {
 		return err
 	}
 	for _, w := range plan.Warnings {
-		fmt.Fprintln(os.Stderr, "terril: warning:", w)
+		fmt.Fprintln(os.Stderr, "terril: warning:", w.Message)
 	}
 	plan.BuildEnv = env.names
 	dockerfile := plan.Dockerfile()

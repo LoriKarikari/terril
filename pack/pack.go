@@ -85,7 +85,7 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 			return nil, err
 		}
 		if w := p.versions.warning(v, f.Today); w != "" {
-			plan.Warnings = append(plan.Warnings, w)
+			plan.Warnings = append(plan.Warnings, Warning{RuntimeEndOfLife, w})
 		}
 	}
 	if f.Start != "" {
