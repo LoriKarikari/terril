@@ -116,8 +116,8 @@ type DotNet struct {
 type Rust struct {
 	Package string
 	Bin     string
-	// The channel from rust-toolchain.toml, when it pins a version.
-	Version string
+	// The toolchain file, rust-toolchain.toml or rust-toolchain, when the app has one.
+	Toolchain string
 }
 
 type Ruby struct {
@@ -894,7 +894,7 @@ func readRust(f *Facts) (*Rust, error) {
 			}
 		}
 		if dir == "." && c.Package.DefaultRun != "" {
-			return &Rust{Package: c.Package.Name, Bin: c.Package.DefaultRun, Version: rustToolchain(f)}, nil
+			return &Rust{Package: c.Package.Name, Bin: c.Package.DefaultRun, Toolchain: rustToolchain(f)}, nil
 		}
 		for name := range names {
 			bins = append(bins, bin{c.Package.Name, name})
@@ -904,7 +904,7 @@ func readRust(f *Facts) (*Rust, error) {
 	case 0:
 		return nil, fmt.Errorf("no Rust binary: add src/main.rs or a [[bin]] to Cargo.toml")
 	case 1:
-		return &Rust{Package: bins[0].pkg, Bin: bins[0].name, Version: rustToolchain(f)}, nil
+		return &Rust{Package: bins[0].pkg, Bin: bins[0].name, Toolchain: rustToolchain(f)}, nil
 	}
 	var names []string
 	for _, b := range bins {
@@ -915,15 +915,10 @@ func readRust(f *Facts) (*Rust, error) {
 }
 
 func rustToolchain(f *Facts) string {
-	if s, ok := f.read("rust-toolchain.toml"); ok {
-		var t struct {
-			Toolchain struct {
-				Channel string `toml:"channel"`
-			} `toml:"toolchain"`
-		}
-		if _, err := toml.Decode(s, &t); err == nil {
-			return t.Toolchain.Channel
+	for _, name := range []string{"rust-toolchain.toml", "rust-toolchain"} {
+		if f.Has(name) {
+			return name
 		}
 	}
-	return f.firstLine("rust-toolchain")
+	return ""
 }

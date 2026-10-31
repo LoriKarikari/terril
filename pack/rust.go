@@ -1,10 +1,6 @@
 package pack
 
-import (
-	"fmt"
-	"regexp"
-	"slices"
-)
+import "slices"
 
 var rustProvider = provider{
 	name: "rust",
@@ -32,23 +28,13 @@ const cargoChefAmd64 = "aca691abfbfbbe00d482e0ed2249eec3091b65e96a0ce92947fb5b25
 // renovate: datasource=github-release-attachments depName=LukeMathWalker/cargo-chef digestVersion=v0.1.78
 const cargoChefArm64 = "cd59b90fce5fa84c4189648fec33404ec5491791eebdb812df5e7fca8336408d"
 
-var rustChannelRe = regexp.MustCompile(`^1\.\d+(\.\d+)?$`)
-
-// The image's own toolchain builds the app. With a toolchain file in the source, rustup would
-// download the channel it names instead, on every cold build.
+// The build stage installs the toolchain file's Rust in its own layer, so a source edit doesn't
+// download it again.
 var rustExcludes = append(slices.Clone(sourceExcludes), "**/target", "rust-toolchain", "rust-toolchain.toml")
 
 func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	r := f.Rust
-	version := rustVersion
-	switch {
-	case r.Version == "" || r.Version == "stable":
-	case rustChannelRe.MatchString(r.Version):
-		version = r.Version
-	default:
-		return nil, Runtime{}, fmt.Errorf("rust-toolchain pins %q; terril builds stable Rust versions like 1.99", r.Version)
-	}
-	image := "rust:" + version + "-trixie"
+	image := "rust:" + rustVersion + "-trixie"
 	registry := []string{"/usr/local/cargo/registry", "/usr/local/cargo/git"}
 
 	stages := []Stage{
@@ -66,11 +52,17 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	pkg := shellQuote([]string{r.Package})
 	bin := shellQuote([]string{r.Bin})
-	steps := []Step{
+	var steps []Step
+	// Docker Hub has trixie images only for Rust 1.88 and newer, and none for nightlies. rustup
+	// installs any toolchain, with the targets and components the file lists.
+	if r.Toolchain != "" {
+		steps = []Step{Copy{Src: []string{r.Toolchain}, Dst: "./"}, Run{Cmd: "rustup toolchain install"}}
+	}
+	steps = append(steps,
 		Copy{From: "planner", Src: []string{"/recipe.json"}, Dst: "/recipe.json"},
 		Run{Cmd: "cargo chef cook --release --locked --recipe-path /recipe.json -p " + pkg + " --bin " + bin, Caches: registry},
 		Copy{Src: []string{"."}, Dst: "./", Exclude: rustExcludes},
-	}
+	)
 	steps = append(steps, copyAssets(assets)...)
 	steps = append(steps, Run{Cmd: "cargo build --release --locked -p " + pkg + " --bin " + bin + " && cp target/release/" + bin + " /out-app", Caches: registry})
 
