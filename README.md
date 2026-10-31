@@ -72,7 +72,7 @@ For .NET, terril publishes the project at the app root, or the only web project 
 
 For Rust, terril builds the only binary in the crate or workspace, or the one `default-run` names. Dependencies compile in their own cached step with [cargo-chef](https://github.com/LukeMathWalker/cargo-chef), so editing your code doesn't recompile them. A version in `rust-toolchain.toml` picks that Rust version.
 
-terril builds only the Node, Python, Ruby and .NET versions that still get security fixes, by the dates on [endoflife.date](https://endoflife.date). From six months before a version's end of life, the build prints a warning with the date. Two months after it, terril refuses to build that version and names the ones it builds. Go apps build with the newest Go, because the `go` line in `go.mod` is a minimum.
+terril builds only the Node, Python, Ruby and .NET versions that still get security fixes, by the dates on [endoflife.date](https://endoflife.date). From six months before a version's end of life, the build prints a warning with the date. Two months after it, terril refuses to build that version and names the ones it builds. A Node version like `22.11.0` builds on the newest Node 22. Go apps build with the newest Go, because the `go` line in `go.mod` is a minimum.
 
 ## Build-time variables
 

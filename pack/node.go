@@ -164,8 +164,12 @@ func nodeModulesExcludes(f *Facts) []string {
 	return excludes
 }
 
+// An exact version builds on the newest release of its major line. Docker Hub has trixie images
+// only for releases since mid-2025, and Node keeps compatibility within a major line.
 func nodeVersion(f *Facts) (string, error) {
-	return nodeVersions.pick(f.Node.Version, f.Today)
+	v, err := nodeVersions.pick(f.Node.Version, f.Today)
+	major, _, _ := strings.Cut(v, ".")
+	return major, err
 }
 
 // Trixie matches distroless debian13, so native modules built here load at runtime.
@@ -311,7 +315,7 @@ func nodeStart(f *Facts) (Cmd, error) {
 // package bin that package-lock.json maps to a file. check verifies that file is a Node script.
 func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok bool) {
 	v, _ := nodeVersion(f)
-	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" || strings.Contains(v, ".") {
+	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" {
 		return "", nil, nil, nil, false
 	}
 	start, err := nodeStart(f)
@@ -348,7 +352,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Env:    append([]Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}, fw.env...),
 			Cmd:    append(Cmd{"node"}, fw.cmd...),
 		}
-		if v, _ := nodeVersion(f); !f.needsDebianRuntime() && !strings.Contains(v, ".") {
+		if v, _ := nodeVersion(f); !f.needsDebianRuntime() {
 			rt.From = "gcr.io/distroless/nodejs" + v + "-debian13"
 			rt.Cmd[0] = "/nodejs/bin/node"
 		}

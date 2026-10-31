@@ -1,0 +1,4 @@
+{
+  "name": "node-exact-version",
+  "scripts": { "start": "node server.js" }
+}
