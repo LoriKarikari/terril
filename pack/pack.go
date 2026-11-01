@@ -93,7 +93,7 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	if f.Start != "" {
 		plan.Runtime.Cmd = Cmd{"sh", "-c", f.Start}
 	}
-	if build := append(f.Config.Packages, f.Config.BuildPackages...); len(build) > 0 {
+	if build := slices.Concat(f.Config.Packages, f.Config.BuildPackages); len(build) > 0 {
 		for i := range plan.Stages {
 			plan.Stages[i].Steps = append([]Step{aptInstall(build)}, plan.Stages[i].Steps...)
 		}

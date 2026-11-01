@@ -774,7 +774,7 @@ func parseConfig(s string) (Config, error) {
 	if keys := md.Undecoded(); len(keys) > 0 {
 		return c, fmt.Errorf("terril.toml: unknown key %q (have: provider, start, packages, build-packages)", keys[0].String())
 	}
-	for _, p := range append(c.Packages, c.BuildPackages...) {
+	for _, p := range slices.Concat(c.Packages, c.BuildPackages) {
 		if !aptPackageRe.MatchString(p) {
 			return c, fmt.Errorf("terril.toml: %q isn't a Debian package name", p)
 		}
