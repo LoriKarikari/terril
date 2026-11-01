@@ -201,25 +201,25 @@ func aptInstall(packages []string) Run {
 }
 
 func (p *Plan) Dockerfile() string {
+	stages := slices.Clone(p.Stages)
+	for i := range stages {
+		stages[i].Steps = withBuildEnv(stages[i].Steps, p.BuildEnv)
+	}
+	stages = append(stages, p.Runtime.stage())
+	var names []string
+	for _, s := range stages {
+		names = append(names, s.Name)
+	}
+
 	var b strings.Builder
 	if !p.NoSyntax {
 		b.WriteString("# syntax=docker/dockerfile:1\n")
 	}
 	fmt.Fprintf(&b, "# terril: %s\n", p.Summary())
-	all := append(slices.Clone(p.Stages), p.Runtime.stage())
-	var names []string
-	for _, s := range all {
-		names = append(names, s.Name)
-	}
-	if slices.ContainsFunc(all, func(s Stage) bool { return strings.Contains(s.From, "${TARGETARCH}") }) {
+	if slices.ContainsFunc(stages, func(s Stage) bool { return strings.Contains(s.From, "${TARGETARCH}") }) {
 		b.WriteString("\nARG TARGETARCH\n")
 	}
-	stages := make([]Stage, len(p.Stages))
-	for i, s := range p.Stages {
-		s.Steps = withBuildEnv(s.Steps, p.BuildEnv)
-		stages[i] = s
-	}
-	for _, s := range append(stages, p.Runtime.stage()) {
+	for _, s := range stages {
 		workdir := "/app"
 		if s.Workdir != "" {
 			workdir = s.Workdir
@@ -238,7 +238,7 @@ func (p *Plan) Dockerfile() string {
 
 // pull leaves stage names, scratch and images outside Docker's official ones unchanged.
 func (p *Plan) pull(ref string, stages []string) string {
-	if p.OfficialImages == "" || ref == "scratch" || slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64")) {
+	if p.OfficialImages == "" || !isImage(ref, stages) {
 		return ref
 	}
 	name := strings.TrimPrefix(ref, "docker.io/library/")
@@ -246,6 +246,10 @@ func (p *Plan) pull(ref string, stages []string) string {
 		return ref
 	}
 	return strings.TrimSuffix(p.OfficialImages, "/") + "/" + name
+}
+
+func isImage(ref string, stages []string) bool {
+	return ref != "scratch" && !slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64"))
 }
 
 // BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.

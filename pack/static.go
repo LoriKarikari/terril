@@ -1,16 +1,13 @@
 package pack
 
-import (
-	"fmt"
-	"path"
-	"regexp"
-)
+import "fmt"
 
 var staticProvider = provider{
-	name: "static",
+	name:     "static",
+	manifest: "index.html",
 	detect: func(f *Facts) Role {
-		if f.Node == nil && f.Python == nil && f.Ruby == nil && f.PHP == nil && f.DotNet == nil && f.Rust == nil && f.Go == nil && f.Has("index.html") {
-			return Primary
+		if f.Has("index.html") {
+			return Fallback
 		}
 		return 0
 	},
@@ -40,6 +37,9 @@ func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 	if len(f.Config.Packages) > 0 {
 		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no apt; remove packages from terril.toml")
 	}
+	if f.Start != "" {
+		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no shell for a start command; remove start from terril.toml, or the web: line from the Procfile")
+	}
 	fallback := ""
 	if spa {
 		fallback = "\ttry_files {path} /index.html\n"
@@ -56,21 +56,4 @@ func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 		},
 		Cmd: Cmd{"caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"},
 	}, nil
-}
-
-var viteOutDirRe = regexp.MustCompile(`outDir:\s*["']([^"']+)["']`)
-
-// viteOutDir returns where a Vite app's build writes its files, or "" if the app doesn't use Vite.
-func viteOutDir(f *Facts) string {
-	pkg := f.Node.Package
-	if pkg.Dependencies["vite"] == "" && pkg.DevDependencies["vite"] == "" || pkg.Scripts["build"] == "" {
-		return ""
-	}
-	for _, name := range []string{"vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs"} {
-		src, _ := f.read(name)
-		if m := viteOutDirRe.FindStringSubmatch(src); m != nil {
-			return path.Clean(m[1])
-		}
-	}
-	return "dist"
 }

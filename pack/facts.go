@@ -21,9 +21,8 @@ import (
 type Facts struct {
 	Dir string
 	// The day to check end-of-life dates against.
-	Today     time.Time
-	Workspace *Workspace
-	// A uv workspace the Python app belongs to. Root is the build context.
+	Today       time.Time
+	Workspace   *Workspace
 	UvWorkspace *Workspace
 	Node        *Node
 	Python      *Python
@@ -33,102 +32,15 @@ type Facts struct {
 	Rust        *Rust
 	Go          *modfile.File
 	GoCgo       bool
-	Config      Config
+	// "." when main.go is at the root, otherwise ./cmd/<name> for each cmd/<name>/main.go.
+	GoMains []string
+	Config  Config
 	// From terril.toml, else the Procfile web: line.
 	Start string
 }
 
-// A JS workspace the app belongs to. Root is the build context.
-type Workspace struct {
-	Root    string
-	App     string
-	Members map[string]Member
-	// Every member's folder, relative to Root and sorted.
-	Dirs []string
-}
-
-type Member struct {
-	Dir   string
-	Deps  []string
-	Build bool
-}
-
-type Config struct {
-	Provider      string   `toml:"provider"`
-	Start         string   `toml:"start"`
-	Packages      []string `toml:"packages"`
-	BuildPackages []string `toml:"build-packages"`
-}
-
-type Node struct {
-	Package        PackageJSON
-	Manager        string
-	ManagerVersion string
-	Lockfile       string
-	Version        string
-	PnP            bool
-	// Production bin names from package-lock.json, mapped to their file under node_modules.
-	Bins map[string]string
-}
-
-type PackageJSON struct {
-	Name            string            `json:"name"`
-	Main            string            `json:"main"`
-	Scripts         map[string]string `json:"scripts"`
-	Dependencies    map[string]string `json:"dependencies"`
-	DevDependencies map[string]string `json:"devDependencies"`
-	PackageManager  string            `json:"packageManager"`
-	Engines         struct {
-		Node string `json:"node"`
-	} `json:"engines"`
-}
-
-type Python struct {
-	Name         string
-	Manager      string
-	Requirements []string
-	Deps         map[string]bool
-	Version      string
-}
-
-type PHP struct {
-	Composer bool
-	// Package names from composer.lock.
-	Packages map[string]bool
-	// "public" for apps with public/index.php, "" for an index.php at the root.
-	DocRoot string
-}
-
-type DotNet struct {
-	// The project to publish, relative to the app.
-	Project string
-	// Every project file, relative to the app, so restore sees the projects it references.
-	Projects        []string
-	Assembly        string
-	TargetFramework string
-	Web             bool
-	// The project turns off culture data, so the runtime can leave ICU out.
-	Invariant bool
-	// From global.json, when it pins one.
-	SDKVersion string
-}
-
-type Rust struct {
-	Package string
-	Bin     string
-	// The toolchain file, rust-toolchain.toml or rust-toolchain, when the app has one.
-	Toolchain string
-}
-
-type Ruby struct {
-	Version string
-	// Gem names from Gemfile.lock, including dependencies of dependencies.
-	Gems map[string]bool
-}
-
 func (f *Facts) Has(name string) bool {
-	_, err := os.Stat(filepath.Join(f.Dir, name))
-	return err == nil
+	return fileExists(filepath.Join(f.Dir, name))
 }
 
 func (f *Facts) read(name string) (string, bool) {
@@ -144,8 +56,7 @@ func (f *Facts) root() string {
 }
 
 func (f *Facts) rootHas(name string) bool {
-	_, err := os.Stat(filepath.Join(f.root(), name))
-	return err == nil
+	return fileExists(filepath.Join(f.root(), name))
 }
 
 func (f *Facts) rootRead(name string) (string, bool) {
@@ -153,13 +64,18 @@ func (f *Facts) rootRead(name string) (string, bool) {
 	return string(b), err == nil
 }
 
-func (f *Facts) firstLine(names ...string) string {
+func firstLine(dir string, names ...string) string {
 	for _, n := range names {
-		if s, ok := f.read(n); ok {
-			return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+		if b, err := os.ReadFile(filepath.Join(dir, n)); err == nil {
+			return strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
 		}
 	}
 	return ""
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func Read(dir string) (*Facts, error) {
@@ -205,7 +121,7 @@ func Read(dir string) (*Facts, error) {
 		}
 		f.Python.Manager = "uv"
 		if f.Python.Version == "" {
-			f.Python.Version = (&Facts{Dir: ws.Root}).firstLine(".python-version")
+			f.Python.Version = firstLine(ws.Root, ".python-version")
 		}
 	}
 	if s, ok := f.read("go.mod"); ok {
@@ -215,6 +131,7 @@ func Read(dir string) (*Facts, error) {
 		if f.GoCgo, err = goUsesCgo(f); err != nil {
 			return nil, err
 		}
+		f.GoMains = goMains(f)
 	}
 	if s, ok := f.read("Procfile"); ok {
 		f.Start = procfileWeb(s)
@@ -233,6 +150,31 @@ func Read(dir string) (*Facts, error) {
 	return f, nil
 }
 
+type Node struct {
+	Package        PackageJSON
+	Manager        string
+	ManagerVersion string
+	Lockfile       string
+	Version        string
+	PnP            bool
+	// Production bin names from package-lock.json, mapped to their file under node_modules.
+	Bins map[string]string
+	// Where vite build writes, from vite.config. Empty when vite isn't a dependency.
+	ViteOutDir string
+}
+
+type PackageJSON struct {
+	Name            string            `json:"name"`
+	Main            string            `json:"main"`
+	Scripts         map[string]string `json:"scripts"`
+	Dependencies    map[string]string `json:"dependencies"`
+	DevDependencies map[string]string `json:"devDependencies"`
+	PackageManager  string            `json:"packageManager"`
+	Engines         struct {
+		Node string `json:"node"`
+	} `json:"engines"`
+}
+
 var nodeLockfiles = []struct{ file, manager string }{
 	{"pnpm-lock.yaml", "pnpm"},
 	{"package-lock.json", "npm"},
@@ -247,7 +189,6 @@ func readNode(f *Facts) (*Node, error) {
 		return nil, nil
 	}
 	n := &Node{}
-	var err error
 	if err := json.Unmarshal([]byte(s), &n.Package); err != nil {
 		return nil, fmt.Errorf("package.json: %w", err)
 	}
@@ -258,12 +199,14 @@ func readNode(f *Facts) (*Node, error) {
 		}
 	}
 	pm := n.Package.PackageManager
-	if rootPkg, ok := f.rootRead("package.json"); ok && pm == "" && f.Workspace != nil {
-		var root PackageJSON
-		if err := json.Unmarshal([]byte(rootPkg), &root); err != nil {
-			return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), "package.json"), err)
+	if pm == "" && f.Workspace != nil {
+		if rootPkg, ok := f.rootRead("package.json"); ok {
+			var root PackageJSON
+			if err := json.Unmarshal([]byte(rootPkg), &root); err != nil {
+				return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), "package.json"), err)
+			}
+			pm = root.PackageManager
 		}
-		pm = root.PackageManager
 	}
 	// packageManager looks like "pnpm@10.4.1+sha512.abc".
 	if pm != "" {
@@ -280,27 +223,87 @@ func readNode(f *Facts) (*Node, error) {
 	}
 	if n.Lockfile == "package-lock.json" && f.Workspace == nil {
 		lock, _ := f.read("package-lock.json")
+		var err error
 		if n.Bins, err = lockBins(lock); err != nil {
 			return nil, err
 		}
 	}
 	if n.Manager == "yarn" {
 		lock, _ := f.rootRead("yarn.lock")
-		yarnrc, _ := f.rootRead(".yarnrc.yml")
-		if f.rootHas(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || !strings.HasPrefix(n.ManagerVersion+"1", "1") {
+		major, _, _ := strings.Cut(n.ManagerVersion, ".")
+		if f.rootHas(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || major != "" && major != "1" {
 			n.Manager = "yarn-berry"
-			n.PnP = !nodeLinkerRe.MatchString(yarnrc)
+			var yarnrc struct {
+				NodeLinker string `yaml:"nodeLinker"`
+			}
+			if s, ok := f.rootRead(".yarnrc.yml"); ok {
+				if err := yaml.Unmarshal([]byte(s), &yarnrc); err != nil {
+					return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), ".yarnrc.yml"), err)
+				}
+			}
+			n.PnP = yarnrc.NodeLinker != "node-modules" && yarnrc.NodeLinker != "pnpm"
 		}
 	}
-	n.Version = strings.TrimPrefix(f.firstLine(".nvmrc", ".node-version"), "v")
+	n.Version = strings.TrimPrefix(firstLine(f.Dir, ".nvmrc", ".node-version"), "v")
 	if n.Version == "" && f.Workspace != nil {
-		root := &Facts{Dir: f.Workspace.Root}
-		n.Version = strings.TrimPrefix(root.firstLine(".nvmrc", ".node-version"), "v")
+		n.Version = strings.TrimPrefix(firstLine(f.Workspace.Root, ".nvmrc", ".node-version"), "v")
 	}
 	if n.Version == "" || strings.HasPrefix(n.Version, "lts") {
 		n.Version = n.Package.Engines.Node
 	}
+	pkg := n.Package
+	if pkg.Dependencies["vite"] != "" || pkg.DevDependencies["vite"] != "" {
+		n.ViteOutDir = "dist"
+		for _, name := range []string{"vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs"} {
+			src, _ := f.read(name)
+			if m := viteOutDirRe.FindStringSubmatch(src); m != nil {
+				n.ViteOutDir = path.Clean(m[1])
+				break
+			}
+		}
+	}
 	return n, nil
+}
+
+var viteOutDirRe = regexp.MustCompile(`outDir:\s*["']([^"']+)["']`)
+
+func lockBins(lock string) (map[string]string, error) {
+	var doc struct {
+		Packages map[string]struct {
+			Bin map[string]string `json:"bin"`
+			Dev bool              `json:"dev"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(lock), &doc); err != nil {
+		return nil, fmt.Errorf("package-lock.json: %w", err)
+	}
+	bins := map[string]string{}
+	for key, pkg := range doc.Packages {
+		dir, top := strings.CutPrefix(key, "node_modules/")
+		if !top || pkg.Dev || strings.Contains(dir, "/node_modules/") {
+			continue
+		}
+		for name, file := range pkg.Bin {
+			bins[name] = path.Join(key, file)
+		}
+	}
+	return bins, nil
+}
+
+// A JS or uv workspace the app belongs to. Root is the build context. Members is only set for
+// a JS workspace.
+type Workspace struct {
+	Root    string
+	App     string
+	Members map[string]Member
+	// Every member's folder, relative to Root and sorted.
+	Dirs []string
+}
+
+type Member struct {
+	Dir   string
+	Deps  []string
+	Build bool
 }
 
 // findWorkspace walks up from an app to the JS workspace that lists it, stopping at the repo root.
@@ -325,10 +328,46 @@ func findWorkspace(dir string) (*Workspace, error) {
 			slices.Sort(dirs)
 			return &Workspace{Root: parent, App: rel, Members: members, Dirs: dirs}, err
 		}
-		if _, err := os.Stat(filepath.Join(parent, ".git")); err == nil || parent == filepath.Dir(parent) {
+		if fileExists(filepath.Join(parent, ".git")) || parent == filepath.Dir(parent) {
 			return nil, nil
 		}
 	}
+}
+
+func workspacePatterns(dir string) ([]string, error) {
+	if b, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml")); err == nil {
+		var ws struct {
+			Packages []string `yaml:"packages"`
+		}
+		if err := yaml.Unmarshal(b, &ws); err != nil {
+			return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "pnpm-workspace.yaml"), err)
+		}
+		return ws.Packages, nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		return nil, nil
+	}
+	var pkg struct {
+		Workspaces json.RawMessage `json:"workspaces"`
+	}
+	if err := json.Unmarshal(b, &pkg); err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "package.json"), err)
+	}
+	if len(pkg.Workspaces) == 0 {
+		return nil, nil
+	}
+	var patterns []string
+	if json.Unmarshal(pkg.Workspaces, &patterns) != nil {
+		var yarnClassic struct {
+			Packages []string `json:"packages"`
+		}
+		if err := json.Unmarshal(pkg.Workspaces, &yarnClassic); err != nil {
+			return nil, fmt.Errorf("%s: workspaces must be a list or have a packages list", filepath.Join(dir, "package.json"))
+		}
+		patterns = yarnClassic.Packages
+	}
+	return patterns, nil
 }
 
 func inWorkspace(patterns []string, rel string) bool {
@@ -381,6 +420,121 @@ func readMembers(root string, patterns []string) (map[string]Member, error) {
 		return nil
 	})
 	return members, err
+}
+
+type Python struct {
+	Name         string
+	Manager      string
+	Requirements []string
+	Deps         map[string]bool
+	Version      string
+	// main.py, app.py and wsgi.py, in that order, when the app has them.
+	Entries []string
+	// The module:variable that first assigns each call at the top of an entry file, such as
+	// "FastAPI": "main:app" for app = FastAPI() in main.py.
+	Apps map[string]string
+	// The package manage.py's DJANGO_SETTINGS_MODULE names, such as mysite.
+	DjangoProject string
+	// The Django project's settings.py sets STATIC_ROOT, which collectstatic needs.
+	DjangoStaticRoot bool
+}
+
+func readPython(f *Facts) (*Python, error) {
+	py := &Python{Manager: "pip", Deps: map[string]bool{}, Apps: map[string]string{}}
+	found := false
+	if s, ok := f.read("requirements.txt"); ok {
+		found = true
+		for _, name := range requirementNames(s) {
+			py.Deps[name] = true
+		}
+	}
+	if s, ok := f.read("pyproject.toml"); ok {
+		found = true
+		var doc struct {
+			Project struct {
+				Name           string   `toml:"name"`
+				Dependencies   []string `toml:"dependencies"`
+				RequiresPython string   `toml:"requires-python"`
+			} `toml:"project"`
+			Tool struct {
+				Poetry struct {
+					Dependencies map[string]any `toml:"dependencies"`
+				} `toml:"poetry"`
+			} `toml:"tool"`
+		}
+		if _, err := toml.Decode(s, &doc); err != nil {
+			return nil, fmt.Errorf("pyproject.toml: %w", err)
+		}
+		py.Name = doc.Project.Name
+		py.Requirements = doc.Project.Dependencies
+		for _, spec := range doc.Project.Dependencies {
+			py.Deps[distName(spec)] = true
+		}
+		for name := range doc.Tool.Poetry.Dependencies {
+			py.Deps[distName(name)] = true
+		}
+		py.Version = doc.Project.RequiresPython
+	}
+	if !found {
+		return nil, nil
+	}
+	switch {
+	case f.Has("uv.lock"):
+		py.Manager = "uv"
+	case f.Has("poetry.lock"):
+		py.Manager = "poetry"
+	}
+	if v := firstLine(f.Dir, ".python-version"); v != "" {
+		py.Version = v
+	}
+	for _, file := range []string{"main.py", "app.py", "wsgi.py"} {
+		if !f.Has(file) {
+			continue
+		}
+		py.Entries = append(py.Entries, file)
+		src, _ := f.read(file)
+		for _, m := range assignCallRe.FindAllStringSubmatch(src, -1) {
+			if _, seen := py.Apps[m[2]]; !seen {
+				py.Apps[m[2]] = strings.TrimSuffix(file, ".py") + ":" + m[1]
+			}
+		}
+	}
+	manage, _ := f.read("manage.py")
+	if m := djangoSettingsRe.FindStringSubmatch(manage); m != nil {
+		py.DjangoProject = m[1]
+		settings, _ := f.read(path.Join(strings.ReplaceAll(m[1], ".", "/"), "settings.py"))
+		py.DjangoStaticRoot = staticRootRe.MatchString(settings)
+	}
+	return py, nil
+}
+
+var (
+	assignCallRe     = regexp.MustCompile(`(?m)^(\w+)\s*=\s*(\w+)\(`)
+	djangoSettingsRe = regexp.MustCompile(`DJANGO_SETTINGS_MODULE["']\s*,\s*["']([\w.]+)\.settings["']`)
+	staticRootRe     = regexp.MustCompile(`(?m)^STATIC_ROOT\s*=`)
+	distNameRe       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*`)
+	normalizeRe      = regexp.MustCompile(`[-_.]+`)
+)
+
+// PEP 503 normalization, so "Django_Rest" matches "django-rest".
+func distName(spec string) string {
+	return strings.ToLower(normalizeRe.ReplaceAllString(distNameRe.FindString(strings.TrimSpace(spec)), "-"))
+}
+
+func requirementNames(s string) []string {
+	var names []string
+	sc := bufio.NewScanner(strings.NewReader(s))
+	for sc.Scan() {
+		line, _, _ := strings.Cut(sc.Text(), "#")
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "-") {
+			continue
+		}
+		if name := distName(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // findUvWorkspace walks up from an app to the uv workspace that lists it, stopping at the repo root.
@@ -441,105 +595,10 @@ func uvMemberDirs(root string, members, exclude []string) ([]string, error) {
 	return dirs, err
 }
 
-func workspacePatterns(dir string) ([]string, error) {
-	if b, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml")); err == nil {
-		var ws struct {
-			Packages []string `yaml:"packages"`
-		}
-		if err := yaml.Unmarshal(b, &ws); err != nil {
-			return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "pnpm-workspace.yaml"), err)
-		}
-		return ws.Packages, nil
-	}
-	b, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
-		return nil, nil
-	}
-	var pkg struct {
-		Workspaces json.RawMessage `json:"workspaces"`
-	}
-	if err := json.Unmarshal(b, &pkg); err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "package.json"), err)
-	}
-	if len(pkg.Workspaces) == 0 {
-		return nil, nil
-	}
-	var patterns []string
-	if json.Unmarshal(pkg.Workspaces, &patterns) != nil {
-		var yarnClassic struct {
-			Packages []string `json:"packages"`
-		}
-		if err := json.Unmarshal(pkg.Workspaces, &yarnClassic); err != nil {
-			return nil, fmt.Errorf("%s: workspaces must be a list or have a packages list", filepath.Join(dir, "package.json"))
-		}
-		patterns = yarnClassic.Packages
-	}
-	return patterns, nil
-}
-
-// Modules that need cgo. A miss fails the build with the package's name, so it can be added here.
-var cgoModules = []string{
-	"github.com/mattn/go-sqlite3",
-	"github.com/confluentinc/confluent-kafka-go",
-	"github.com/confluentinc/confluent-kafka-go/v2",
-}
-
-var importCRe = regexp.MustCompile(`(?m)^\s*(import\s+)?"C"\s*$`)
-
-func goUsesCgo(f *Facts) (bool, error) {
-	for _, r := range f.Go.Require {
-		if slices.Contains(cgoModules, r.Mod.Path) {
-			return true, nil
-		}
-	}
-	found := false
-	err := filepath.WalkDir(f.Dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || found {
-			return err
-		}
-		if d.IsDir() {
-			name := d.Name()
-			if p != f.Dir && (name == "vendor" || name == "testdata" || name == "node_modules" || strings.HasPrefix(name, ".") || fileExists(filepath.Join(p, "go.mod"))) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
-			return nil
-		}
-		b, err := os.ReadFile(p)
-		found = err == nil && importCRe.Match(b)
-		return err
-	})
-	return found, err
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-func lockBins(lock string) (map[string]string, error) {
-	var doc struct {
-		Packages map[string]struct {
-			Bin map[string]string `json:"bin"`
-			Dev bool              `json:"dev"`
-		} `json:"packages"`
-	}
-	if err := json.Unmarshal([]byte(lock), &doc); err != nil {
-		return nil, fmt.Errorf("package-lock.json: %w", err)
-	}
-	bins := map[string]string{}
-	for key, pkg := range doc.Packages {
-		dir, top := strings.CutPrefix(key, "node_modules/")
-		if !top || pkg.Dev || strings.Contains(dir, "/node_modules/") {
-			continue
-		}
-		for name, file := range pkg.Bin {
-			bins[name] = path.Join(key, file)
-		}
-	}
-	return bins, nil
+type Ruby struct {
+	Version string
+	// Gem names from Gemfile.lock, including dependencies of dependencies.
+	Gems map[string]bool
 }
 
 var (
@@ -548,6 +607,45 @@ var (
 	gemfileRubyRe     = regexp.MustCompile(`(?m)^\s*ruby\s+["']([^"']+)["']`)
 	rubyVersionNumber = regexp.MustCompile(`\d+(\.\d+){0,2}`)
 )
+
+func readRuby(f *Facts) (*Ruby, error) {
+	if !f.Has("Gemfile") {
+		return nil, nil
+	}
+	lock, ok := f.read("Gemfile.lock")
+	if !ok {
+		return nil, fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it")
+	}
+	r := &Ruby{Gems: map[string]bool{}}
+	for _, m := range lockGemRe.FindAllStringSubmatch(lock, -1) {
+		r.Gems[m[1]] = true
+	}
+	sections := map[string][]string{}
+	for _, m := range lockSectionRe.FindAllStringSubmatch(lock, -1) {
+		sections[m[1]] = strings.Fields(m[2])
+	}
+	platforms := sections["PLATFORMS"]
+	if !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }) {
+		return nil, fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
+			strings.Join(platforms, ", "))
+	}
+	if v := firstLine(f.Dir, ".ruby-version"); v != "" {
+		r.Version = rubyVersionNumber.FindString(v)
+	} else if v := sections["RUBY VERSION"]; len(v) > 1 {
+		r.Version = rubyVersionNumber.FindString(v[1])
+	} else if gemfile, _ := f.read("Gemfile"); gemfileRubyRe.MatchString(gemfile) {
+		r.Version = gemfileRubyRe.FindStringSubmatch(gemfile)[1]
+	}
+	return r, nil
+}
+
+type PHP struct {
+	Composer bool
+	// Package names from composer.lock.
+	Packages map[string]bool
+	// "public" for apps with public/index.php, "" for an index.php at the root.
+	DocRoot string
+}
 
 func readPHP(f *Facts) (*PHP, error) {
 	p := &PHP{Packages: map[string]bool{}, Composer: f.Has("composer.json")}
@@ -581,145 +679,18 @@ func readPHP(f *Facts) (*PHP, error) {
 	return p, nil
 }
 
-func readRuby(f *Facts) (*Ruby, error) {
-	if !f.Has("Gemfile") {
-		return nil, nil
-	}
-	lock, ok := f.read("Gemfile.lock")
-	if !ok {
-		return nil, fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it")
-	}
-	r := &Ruby{Gems: map[string]bool{}}
-	for _, m := range lockGemRe.FindAllStringSubmatch(lock, -1) {
-		r.Gems[m[1]] = true
-	}
-	sections := map[string][]string{}
-	for _, m := range lockSectionRe.FindAllStringSubmatch(lock, -1) {
-		sections[m[1]] = strings.Fields(m[2])
-	}
-	platforms := sections["PLATFORMS"]
-	if !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }) {
-		return nil, fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
-			strings.Join(platforms, ", "))
-	}
-	if v := f.firstLine(".ruby-version"); v != "" {
-		r.Version = rubyVersionNumber.FindString(v)
-	} else if v := sections["RUBY VERSION"]; len(v) > 1 {
-		r.Version = rubyVersionNumber.FindString(v[1])
-	} else if gemfile, _ := f.read("Gemfile"); gemfileRubyRe.MatchString(gemfile) {
-		r.Version = gemfileRubyRe.FindStringSubmatch(gemfile)[1]
-	}
-	return r, nil
-}
-
-var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
-
-func readPython(f *Facts) (*Python, error) {
-	py := &Python{Manager: "pip", Deps: map[string]bool{}}
-	found := false
-	if s, ok := f.read("requirements.txt"); ok {
-		found = true
-		for _, name := range requirementNames(s) {
-			py.Deps[name] = true
-		}
-	}
-	if s, ok := f.read("pyproject.toml"); ok {
-		found = true
-		var doc struct {
-			Project struct {
-				Name           string   `toml:"name"`
-				Dependencies   []string `toml:"dependencies"`
-				RequiresPython string   `toml:"requires-python"`
-			} `toml:"project"`
-			Tool struct {
-				Poetry struct {
-					Dependencies map[string]any `toml:"dependencies"`
-				} `toml:"poetry"`
-			} `toml:"tool"`
-		}
-		if _, err := toml.Decode(s, &doc); err != nil {
-			return nil, fmt.Errorf("pyproject.toml: %w", err)
-		}
-		py.Name = doc.Project.Name
-		py.Requirements = doc.Project.Dependencies
-		for _, spec := range doc.Project.Dependencies {
-			py.Deps[distName(spec)] = true
-		}
-		for name := range doc.Tool.Poetry.Dependencies {
-			py.Deps[distName(name)] = true
-		}
-		py.Version = doc.Project.RequiresPython
-	}
-	if !found {
-		return nil, nil
-	}
-	switch {
-	case f.Has("uv.lock"):
-		py.Manager = "uv"
-	case f.Has("poetry.lock"):
-		py.Manager = "poetry"
-	}
-	if v := f.firstLine(".python-version"); v != "" {
-		py.Version = v
-	}
-	return py, nil
-}
-
-var distNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*`)
-var normalizeRe = regexp.MustCompile(`[-_.]+`)
-
-// PEP 503 normalization, so "Django_Rest" matches "django-rest".
-func distName(spec string) string {
-	return strings.ToLower(normalizeRe.ReplaceAllString(distNameRe.FindString(strings.TrimSpace(spec)), "-"))
-}
-
-func requirementNames(s string) []string {
-	var names []string
-	sc := bufio.NewScanner(strings.NewReader(s))
-	for sc.Scan() {
-		line, _, _ := strings.Cut(sc.Text(), "#")
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "-") {
-			continue
-		}
-		if name := distName(line); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
-var aptPackageRe = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`)
-
-func parseConfig(s string) (Config, error) {
-	var c Config
-	md, err := toml.Decode(s, &c)
-	if err != nil {
-		return c, fmt.Errorf("terril.toml: %w", err)
-	}
-	if keys := md.Undecoded(); len(keys) > 0 {
-		return c, fmt.Errorf("terril.toml: unknown key %q (have: provider, start, packages, build-packages)", keys[0].String())
-	}
-	for _, p := range append(c.Packages, c.BuildPackages...) {
-		if !aptPackageRe.MatchString(p) {
-			return c, fmt.Errorf("terril.toml: %q isn't a Debian package name", p)
-		}
-	}
-	return c, nil
-}
-
-// Distroless images have no shell for a custom start command and no apt for packages.
-func (f *Facts) needsDebianRuntime() bool {
-	return f.Start != "" || len(f.Config.Packages) > 0
-}
-
-func procfileWeb(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if cmd, ok := strings.CutPrefix(strings.TrimSpace(line), "web:"); ok {
-			return strings.TrimSpace(cmd)
-		}
-	}
-	return ""
+type DotNet struct {
+	// The project to publish, relative to the app.
+	Project string
+	// Every project file, relative to the app, so restore sees the projects it references.
+	Projects        []string
+	Assembly        string
+	TargetFramework string
+	Web             bool
+	// The project turns off culture data, so the runtime can leave ICU out.
+	Invariant bool
+	// From global.json, when it pins one.
+	SDKVersion string
 }
 
 type csproj struct {
@@ -823,6 +794,13 @@ func readDotNet(f *Facts) (*DotNet, error) {
 	return d, nil
 }
 
+type Rust struct {
+	Package string
+	Bin     string
+	// The toolchain file, rust-toolchain.toml or rust-toolchain, when the app has one.
+	Toolchain string
+}
+
 type cargoToml struct {
 	Package *struct {
 		Name       string `toml:"name"`
@@ -921,4 +899,89 @@ func rustToolchain(f *Facts) string {
 		}
 	}
 	return ""
+}
+
+// Modules that need cgo. A miss fails the build with the package's name, so it can be added here.
+var cgoModules = []string{
+	"github.com/mattn/go-sqlite3",
+	"github.com/confluentinc/confluent-kafka-go",
+	"github.com/confluentinc/confluent-kafka-go/v2",
+}
+
+var importCRe = regexp.MustCompile(`(?m)^\s*(import\s+)?"C"\s*$`)
+
+func goUsesCgo(f *Facts) (bool, error) {
+	for _, r := range f.Go.Require {
+		if slices.Contains(cgoModules, r.Mod.Path) {
+			return true, nil
+		}
+	}
+	found := false
+	err := filepath.WalkDir(f.Dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if p != f.Dir && (name == "vendor" || name == "testdata" || name == "node_modules" || strings.HasPrefix(name, ".") || fileExists(filepath.Join(p, "go.mod"))) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		found = err == nil && importCRe.Match(b)
+		return err
+	})
+	return found, err
+}
+
+func goMains(f *Facts) []string {
+	if f.Has("main.go") {
+		return []string{"."}
+	}
+	files, _ := filepath.Glob(filepath.Join(f.Dir, "cmd", "*", "main.go"))
+	var mains []string
+	for _, file := range files {
+		rel, _ := filepath.Rel(f.Dir, filepath.Dir(file))
+		mains = append(mains, "./"+filepath.ToSlash(rel))
+	}
+	return mains
+}
+
+func procfileWeb(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if cmd, ok := strings.CutPrefix(strings.TrimSpace(line), "web:"); ok {
+			return strings.TrimSpace(cmd)
+		}
+	}
+	return ""
+}
+
+type Config struct {
+	Provider      string   `toml:"provider"`
+	Start         string   `toml:"start"`
+	Packages      []string `toml:"packages"`
+	BuildPackages []string `toml:"build-packages"`
+}
+
+var aptPackageRe = regexp.MustCompile(`^[a-z0-9][a-z0-9+.-]+$`)
+
+func parseConfig(s string) (Config, error) {
+	var c Config
+	md, err := toml.Decode(s, &c)
+	if err != nil {
+		return c, fmt.Errorf("terril.toml: %w", err)
+	}
+	if keys := md.Undecoded(); len(keys) > 0 {
+		return c, fmt.Errorf("terril.toml: unknown key %q (have: provider, start, packages, build-packages)", keys[0].String())
+	}
+	for _, p := range slices.Concat(c.Packages, c.BuildPackages) {
+		if !aptPackageRe.MatchString(p) {
+			return c, fmt.Errorf("terril.toml: %q isn't a Debian package name", p)
+		}
+	}
+	return c, nil
 }

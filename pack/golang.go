@@ -3,7 +3,7 @@ package pack
 import (
 	"fmt"
 	goversion "go/version"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 
@@ -11,7 +11,8 @@ import (
 )
 
 var goProvider = provider{
-	name: "go",
+	name:     "go",
+	manifest: "go.mod",
 	detect: func(f *Facts) Role {
 		if f.Go == nil {
 			return 0
@@ -45,7 +46,7 @@ func goImageVersion(m *modfile.File) string {
 
 func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	version := goImageVersion(f.Go)
-	pkg, err := goMainPackage(f)
+	pkg, err := goMainPackage(f.GoMains)
 	if err != nil {
 		return nil, Runtime{}, err
 	}
@@ -54,15 +55,12 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.Has("go.sum") {
 		mods = append(mods, "go.sum")
 	}
+	download := Run{Cmd: "go mod download", Caches: []string{"/go/pkg/mod"}}
 	caches := []string{"/go/pkg/mod", "/root/.cache/go-build"}
-	steps := []Step{
-		Copy{Src: mods, Dst: "./"},
-		Run{Cmd: "go mod download", Caches: caches[:1]},
-		copySource(),
-	}
+	steps := []Step{Copy{Src: mods, Dst: "./"}, download, copySource()}
 	// A replace with a local path needs that folder before modules can download.
 	if slices.ContainsFunc(f.Go.Replace, func(r *modfile.Replace) bool { return modfile.IsDirectoryPath(r.New.Path) }) {
-		steps = []Step{copySource(), Run{Cmd: "go mod download", Caches: caches[:1]}}
+		steps = []Step{copySource(), download}
 	}
 	steps = append(steps, copyAssets(assets)...)
 
@@ -91,21 +89,16 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}, nil
 }
 
-func goMainPackage(f *Facts) (string, error) {
-	if f.Has("main.go") {
-		return ".", nil
-	}
-	dirs, _ := filepath.Glob(filepath.Join(f.Dir, "cmd", "*", "main.go"))
-	switch len(dirs) {
+func goMainPackage(mains []string) (string, error) {
+	switch len(mains) {
 	case 0:
 		return "", fmt.Errorf("no main package: add main.go or cmd/<name>/main.go")
 	case 1:
-		rel, _ := filepath.Rel(f.Dir, filepath.Dir(dirs[0]))
-		return "./" + filepath.ToSlash(rel), nil
+		return mains[0], nil
 	}
 	var names []string
-	for _, d := range dirs {
-		names = append(names, filepath.Base(filepath.Dir(d)))
+	for _, m := range mains {
+		names = append(names, path.Base(m))
 	}
 	return "", fmt.Errorf("several main packages in cmd/ (%s); add a main.go at the root to pick one", strings.Join(names, ", "))
 }

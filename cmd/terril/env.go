@@ -12,7 +12,6 @@ import (
 
 var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// envFlags collects --env KEY=VALUE, or --env KEY to take the value from terril's own environment.
 type envFlags struct {
 	names  []string
 	values map[string]string
@@ -28,23 +27,23 @@ func (e *envFlags) Set(s string) error {
 	if !hasValue {
 		value, hasValue = os.LookupEnv(name)
 	}
+	if !slices.Contains(e.names, name) {
+		e.names = append(e.names, name)
+	}
 	if e.values == nil {
 		e.values = map[string]string{}
-	}
-	if _, seen := e.values[name]; !seen {
-		e.names = append(e.names, name)
 	}
 	if hasValue {
 		e.values[name] = value
 	} else {
-		e.values[name] = "\x00unset"
+		delete(e.values, name)
 	}
 	return nil
 }
 
 func (e *envFlags) check() error {
 	for _, n := range e.names {
-		if e.values[n] == "\x00unset" {
+		if _, ok := e.values[n]; !ok {
 			return fmt.Errorf("--env %s: %s isn't set in the environment; pass --env %s=VALUE", n, n, n)
 		}
 	}

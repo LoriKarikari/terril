@@ -6,7 +6,8 @@ import (
 )
 
 var phpProvider = provider{
-	name: "php",
+	name:     "php",
+	manifest: "index.php or public/index.php",
 	detect: func(f *Facts) Role {
 		if f.PHP == nil {
 			return 0
@@ -72,7 +73,7 @@ const frankenphpCaddyfile = `{
 `
 
 func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
-	if f.Start != "" || len(f.Config.Packages) > 0 {
+	if f.needsDebianRuntime() {
 		return nil, Runtime{}, fmt.Errorf("PHP apps run on a distroless image with FrankenPHP, which has no shell or apt; remove start and packages from terril.toml")
 	}
 	var stages []Stage

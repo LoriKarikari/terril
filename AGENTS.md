@@ -1,11 +1,11 @@
 # terril
 
-terril is an open-source CLI that builds a container image from a Node, Python or Go app, or a static site. It reads the app's manifests, writes a Dockerfile, and runs `docker build`. `terril plan` prints that Dockerfile.
+terril is an open-source CLI that builds a container image from a Node, Python, Ruby, PHP, .NET, Rust or Go app, or a static site. It reads the app's manifests, writes a Dockerfile, and runs `docker build`. `terril plan` prints that Dockerfile.
 
 ## Code
 
-- `pack/facts.go` reads and parses every manifest, lockfile and `terril.toml`. Nothing else reads app files.
-- `pack/pack.go` picks the providers and their roles. The primary provider owns the runtime image. Node can also build assets for a Python or Go app.
+- `pack/facts.go` reads and parses every manifest, lockfile and `terril.toml`. Nothing else reads app files. A provider may only check whether a file exists, with `Facts.Has` or `rootHas`, and `just lint` fails on any other read in `pack/`.
+- `pack/pack.go` picks the providers and their roles. The primary provider owns the runtime image. Node can also build assets for an app in another language.
 - One file per language in `pack/` (`node.go`, `python.go`, `ruby.go`, `php.go`, `dotnet.go`, `rust.go`, `golang.go`, `static.go`) turns facts into build stages and a runtime.
 - `pack/version.go` lists the Node, Python, Ruby and .NET versions terril builds, each with its end-of-life date. A new version needs its date.
 - `pack/plan.go` renders a plan to a Dockerfile.
