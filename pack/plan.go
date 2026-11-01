@@ -238,7 +238,7 @@ func (p *Plan) Dockerfile() string {
 
 // pull leaves stage names, scratch and images outside Docker's official ones unchanged.
 func (p *Plan) pull(ref string, stages []string) string {
-	if p.OfficialImages == "" || ref == "scratch" || slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64")) {
+	if p.OfficialImages == "" || !isImage(ref, stages) {
 		return ref
 	}
 	name := strings.TrimPrefix(ref, "docker.io/library/")
@@ -246,6 +246,10 @@ func (p *Plan) pull(ref string, stages []string) string {
 		return ref
 	}
 	return strings.TrimSuffix(p.OfficialImages, "/") + "/" + name
+}
+
+func isImage(ref string, stages []string) bool {
+	return ref != "scratch" && !slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64"))
 }
 
 // BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.

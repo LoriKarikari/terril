@@ -37,6 +37,9 @@ func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 	if len(f.Config.Packages) > 0 {
 		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no apt; remove packages from terril.toml")
 	}
+	if f.Start != "" {
+		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no shell for a start command; remove start from terril.toml, or the web: line from the Procfile")
+	}
 	fallback := ""
 	if spa {
 		fallback = "\ttry_files {path} /index.html\n"
