@@ -51,7 +51,7 @@ func main() {
 		return
 	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	provider := fs.String("provider", "", "force the primary provider (go, python, node)")
+	provider := fs.String("provider", "", "force the primary provider: node, python, ruby, php, dotnet, rust, go or static")
 	tag := fs.String("t", "", "image tag (build only; default: directory name)")
 	var env envFlags
 	fs.Var(&env, "env", "build-time variable, KEY=VALUE or KEY (repeatable)")
