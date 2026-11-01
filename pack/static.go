@@ -5,8 +5,8 @@ import "fmt"
 var staticProvider = provider{
 	name: "static",
 	detect: func(f *Facts) Role {
-		if f.Node == nil && f.Python == nil && f.Ruby == nil && f.PHP == nil && f.DotNet == nil && f.Rust == nil && f.Go == nil && f.Has("index.html") {
-			return Primary
+		if f.Has("index.html") {
+			return Fallback
 		}
 		return 0
 	},

@@ -11,6 +11,8 @@ type Role uint8
 const (
 	Primary Role = 1 << iota
 	Assets
+	// Fallback runs the app when no provider has the Primary role.
+	Fallback
 )
 
 type provider struct {
@@ -56,8 +58,8 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 		plan.Context = ws.Root
 	}
 	var assetNames []string
-	for _, p := range providers {
-		if p.name == primary.name || roles[p.name]&Assets == 0 {
+	for _, p := range withRole(roles, Assets) {
+		if p.name == primary.name {
 			continue
 		}
 		name := "assets-" + p.name
@@ -110,11 +112,9 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 		return provider{}, fmt.Errorf("unknown provider %q (have: %s)", force, strings.Join(providerNames(), ", "))
 	}
 
-	var candidates []provider
-	for _, p := range providers {
-		if roles[p.name]&Primary != 0 {
-			candidates = append(candidates, p)
-		}
+	candidates := withRole(roles, Primary)
+	if len(candidates) == 0 {
+		candidates = withRole(roles, Fallback)
 	}
 	// So a Python app with a package.json runs as Python, with Node building its assets.
 	if slices.ContainsFunc(candidates, func(p provider) bool { return roles[p.name]&Assets == 0 }) {
@@ -141,4 +141,14 @@ func providerNames() []string {
 		names = append(names, p.name)
 	}
 	return names
+}
+
+func withRole(roles map[string]Role, r Role) []provider {
+	var ps []provider
+	for _, p := range providers {
+		if roles[p.name]&r != 0 {
+			ps = append(ps, p)
+		}
+	}
+	return ps
 }
