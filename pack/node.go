@@ -295,34 +295,39 @@ func nodeStart(f *Facts) (Cmd, error) {
 }
 
 // Distroless images have no shell or package manager, so the start script must be one call to
-// node, to bun on Bun, or to a package bin that package-lock.json maps to a file. check verifies
-// that file is a Node script.
-func nodeDistroless(f *Facts) (from string, env []Env, cmd Cmd, check *Run, ok bool) {
+// node, to bun on Bun, or to a package bin that package-lock.json maps to a file. The build then
+// checks that file is a Node script.
+func nodeDistroless(f *Facts, rt Runtime, build Stage) (Runtime, Stage) {
 	start, err := nodeStart(f)
 	if err != nil || f.needsDebianRuntime() {
-		return "", nil, nil, nil, false
+		return rt, build
 	}
 	bun := f.Node.Manager == "bun"
+	var check []Step
 	if script := f.Node.Package.Scripts["start"]; script != "" {
-		var args []string
-		if env, args, ok = directCommand(script); !ok {
-			return "", nil, nil, nil, false
+		env, args, ok := directCommand(script)
+		if !ok {
+			return rt, build
 		}
 		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
 			args = append([]string{"node", bin}, args[1:]...)
-			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
-				"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}
+			check = []Step{Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
+				"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}}
 		}
 		runtimeCall := args[0] == "node" || bun && args[0] == "bun"
 		if !runtimeCall || len(args) < 2 {
-			return "", nil, nil, nil, false
+			return rt, build
 		}
 		start = Cmd(args)
+		rt.Env = append(rt.Env, env...)
 	}
 	if bun {
-		return "oven/bun:" + bunVersion(f.Node) + "-distroless", env, append(Cmd{"bun"}, start[1:]...), check, true
+		rt.From, rt.Cmd = "oven/bun:"+bunVersion(f.Node)+"-distroless", append(Cmd{"bun"}, start[1:]...)
+	} else {
+		rt.From, rt.Cmd = distrolessNodeImage(f), append(Cmd{"/nodejs/bin/node"}, start[1:]...)
 	}
-	return distrolessNodeImage(f), env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), check, true
+	build.Steps = append(build.Steps, check...)
+	return rt, build
 }
 
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -372,12 +377,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Env:    env,
 		Cmd:    start,
 	}
-	if from, startEnv, cmd, check, ok := nodeDistroless(f); ok {
-		rt.From, rt.Cmd, rt.Env = from, cmd, append(rt.Env, startEnv...)
-		if check != nil {
-			build.Steps = append(build.Steps, *check)
-		}
-	}
+	rt, build = nodeDistroless(f, rt, build)
 	if f.Workspace != nil {
 		rt.Workdir = "/app/" + f.Workspace.App
 	}

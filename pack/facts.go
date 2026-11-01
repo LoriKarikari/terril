@@ -429,22 +429,18 @@ type Python struct {
 	Deps         map[string]bool
 	Version      string
 	// main.py, app.py and wsgi.py, in that order, when the app has them.
-	Entries []PythonEntry
+	Entries []string
+	// The module:variable that first assigns each call at the top of an entry file, such as
+	// "FastAPI": "main:app" for app = FastAPI() in main.py.
+	Apps map[string]string
 	// The package manage.py's DJANGO_SETTINGS_MODULE names, such as mysite.
 	DjangoProject string
 	// The Django project's settings.py sets STATIC_ROOT, which collectstatic needs.
 	DjangoStaticRoot bool
 }
 
-type PythonEntry struct {
-	File string
-	// The first variable each call at the top of the file is assigned to, such as
-	// "FastAPI": "app" for app = FastAPI().
-	Assigns map[string]string
-}
-
 func readPython(f *Facts) (*Python, error) {
-	py := &Python{Manager: "pip", Deps: map[string]bool{}}
+	py := &Python{Manager: "pip", Deps: map[string]bool{}, Apps: map[string]string{}}
 	found := false
 	if s, ok := f.read("requirements.txt"); ok {
 		found = true
@@ -495,14 +491,13 @@ func readPython(f *Facts) (*Python, error) {
 		if !f.Has(file) {
 			continue
 		}
+		py.Entries = append(py.Entries, file)
 		src, _ := f.read(file)
-		e := PythonEntry{File: file, Assigns: map[string]string{}}
 		for _, m := range assignCallRe.FindAllStringSubmatch(src, -1) {
-			if _, seen := e.Assigns[m[2]]; !seen {
-				e.Assigns[m[2]] = m[1]
+			if _, seen := py.Apps[m[2]]; !seen {
+				py.Apps[m[2]] = strings.TrimSuffix(file, ".py") + ":" + m[1]
 			}
 		}
-		py.Entries = append(py.Entries, e)
 	}
 	manage, _ := f.read("manage.py")
 	if m := djangoSettingsRe.FindStringSubmatch(manage); m != nil {

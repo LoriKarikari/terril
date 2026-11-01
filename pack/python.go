@@ -1,9 +1,6 @@
 package pack
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 var pythonProvider = provider{
 	name: "python",
@@ -176,8 +173,8 @@ var pythonFrameworks = []struct {
 	module            func(py *Python) string
 }{
 	{"Django", "django", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, djangoWSGI},
-	{"FastAPI", "fastapi", "uvicorn", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }, appObject("FastAPI")},
-	{"Flask", "flask", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, appObject("Flask")},
+	{"FastAPI", "fastapi", "uvicorn", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }, func(py *Python) string { return py.Apps["FastAPI"] }},
+	{"Flask", "flask", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, func(py *Python) string { return py.Apps["Flask"] }},
 }
 
 func pythonStart(py *Python) (Cmd, error) {
@@ -195,20 +192,9 @@ func pythonStart(py *Python) (Cmd, error) {
 		return fw.cmd(module), nil
 	}
 	if len(py.Entries) > 0 {
-		return Cmd{"python", py.Entries[0].File}, nil
+		return Cmd{"python", py.Entries[0]}, nil
 	}
 	return nil, fmt.Errorf("no start command: add a main.py, or a Procfile with a web: line")
-}
-
-func appObject(call string) func(*Python) string {
-	return func(py *Python) string {
-		for _, e := range py.Entries {
-			if v := e.Assigns[call]; v != "" {
-				return strings.TrimSuffix(e.File, ".py") + ":" + v
-			}
-		}
-		return ""
-	}
 }
 
 func djangoWSGI(py *Python) string {
