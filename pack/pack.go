@@ -16,7 +16,9 @@ const (
 )
 
 type provider struct {
-	name       string
+	name string
+	// Named in the error when --provider or terril.toml picks a provider that detects nothing.
+	manifest   string
 	detect     func(*Facts) Role
 	plan       func(f *Facts, assetStages []string) ([]Stage, Runtime, error)
 	assetStage func(f *Facts, name string) (Stage, error)
@@ -110,6 +112,9 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 	if force != "" {
 		for _, p := range providers {
 			if p.name == force {
+				if roles[p.name] == 0 {
+					return provider{}, fmt.Errorf("no %s found; can't build this app as %s", p.manifest, p.name)
+				}
 				return p, nil
 			}
 		}

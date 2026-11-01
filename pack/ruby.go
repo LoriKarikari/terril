@@ -3,7 +3,8 @@ package pack
 import "fmt"
 
 var rubyProvider = provider{
-	name: "ruby",
+	name:     "ruby",
+	manifest: "Gemfile",
 	detect: func(f *Facts) Role {
 		if f.Ruby == nil {
 			return 0
