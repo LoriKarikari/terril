@@ -22,6 +22,12 @@ type Plan struct {
 	// Names of variables the build steps read. Their values never reach the image.
 	BuildEnv []string
 	Warnings []Warning
+	// The registry path that serves Docker's official images, such as public.ecr.aws/docker/library.
+	// Empty pulls them from Docker Hub.
+	OfficialImages string
+	// Leaves out the syntax directive. Only a builder whose own Dockerfile frontend knows
+	// COPY --parents and --exclude, such as Docker 29, can build the result.
+	NoSyntax bool
 }
 
 // Treat a Kind you don't know as a plain warning. terril may add kinds in any release.
@@ -196,9 +202,15 @@ func aptInstall(packages []string) Run {
 
 func (p *Plan) Dockerfile() string {
 	var b strings.Builder
-	b.WriteString("# syntax=docker/dockerfile:1\n")
+	if !p.NoSyntax {
+		b.WriteString("# syntax=docker/dockerfile:1\n")
+	}
 	fmt.Fprintf(&b, "# terril: %s\n", p.Summary())
 	all := append(slices.Clone(p.Stages), p.Runtime.stage())
+	var names []string
+	for _, s := range all {
+		names = append(names, s.Name)
+	}
 	if slices.ContainsFunc(all, func(s Stage) bool { return strings.Contains(s.From, "${TARGETARCH}") }) {
 		b.WriteString("\nARG TARGETARCH\n")
 	}
@@ -212,12 +224,28 @@ func (p *Plan) Dockerfile() string {
 		if s.Workdir != "" {
 			workdir = s.Workdir
 		}
-		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR %s\n", s.From, s.Name, workdir)
+		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR %s\n", p.pull(s.From, names), s.Name, workdir)
 		for _, step := range s.Steps {
+			if c, ok := step.(Copy); ok && c.From != "" {
+				c.From = p.pull(c.From, names)
+				step = c
+			}
 			b.WriteString(step.dockerfile() + "\n")
 		}
 	}
 	return b.String()
+}
+
+// pull leaves stage names, scratch and images outside Docker's official ones unchanged.
+func (p *Plan) pull(ref string, stages []string) string {
+	if p.OfficialImages == "" || ref == "scratch" || slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64")) {
+		return ref
+	}
+	name := strings.TrimPrefix(ref, "docker.io/library/")
+	if strings.Contains(name, "/") {
+		return ref
+	}
+	return strings.TrimSuffix(p.OfficialImages, "/") + "/" + name
 }
 
 // BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.
