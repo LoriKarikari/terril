@@ -1,6 +1,22 @@
 version: "2"
 linters:
   default: standard
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^(os\.(Open|OpenFile|ReadFile|ReadDir|Stat|Lstat|DirFS)|filepath\.(Glob|Walk|WalkDir)|pack\.Facts\.(read|rootRead))$
+          msg: providers read typed facts; read and parse the file in pack/facts.go
+  exclusions:
+    rules:
+      - path-except: ^pack/
+        linters:
+          - forbidigo
+      - path: ^pack/facts\.go$
+        linters:
+          - forbidigo
 formatters:
   enable:
     - gofmt

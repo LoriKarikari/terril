@@ -314,7 +314,8 @@ func nodeDistroless(f *Facts) (from string, env []Env, cmd Cmd, check *Run, ok b
 			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
 				"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}
 		}
-		if len(args) < 2 || args[0] != "node" && !(bun && args[0] == "bun") {
+		runtimeCall := args[0] == "node" || bun && args[0] == "bun"
+		if !runtimeCall || len(args) < 2 {
 			return "", nil, nil, nil, false
 		}
 		start = Cmd(args)
