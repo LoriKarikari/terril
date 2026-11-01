@@ -102,6 +102,11 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	return plan, nil
 }
 
+// Distroless images have no shell for a custom start command and no apt for packages.
+func (f *Facts) needsDebianRuntime() bool {
+	return f.Start != "" || len(f.Config.Packages) > 0
+}
+
 func pickPrimary(roles map[string]Role, force string) (provider, error) {
 	if force != "" {
 		for _, p := range providers {
