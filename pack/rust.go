@@ -35,7 +35,9 @@ var rustExcludes = append(slices.Clone(sourceExcludes), "**/target", "rust-toolc
 func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	r := f.Rust
 	image := "rust:" + rustVersion + "-trixie"
-	registry := []string{"/usr/local/cargo/registry", "/usr/local/cargo/git"}
+	// Cargo's package lock is outside these mounts, so builds that share one unpack the same crate
+	// at once and fail. Each concurrent build gets its own.
+	registry := []string{"/usr/local/cargo/registry,sharing=private", "/usr/local/cargo/git,sharing=private"}
 
 	stages := []Stage{
 		{Name: "cargo-chef-amd64", From: "scratch", Steps: []Step{Add{URL: cargoChefURL("x86_64"), SHA256: cargoChefAmd64, Dst: "/cargo-chef.tar.xz"}}},
