@@ -3,7 +3,8 @@ package pack
 import "fmt"
 
 var pythonProvider = provider{
-	name: "python",
+	name:     "python",
+	manifest: "requirements.txt or pyproject.toml",
 	detect: func(f *Facts) Role {
 		if f.Python == nil {
 			return 0

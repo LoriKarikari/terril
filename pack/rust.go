@@ -3,7 +3,8 @@ package pack
 import "slices"
 
 var rustProvider = provider{
-	name: "rust",
+	name:     "rust",
+	manifest: "Cargo.toml",
 	detect: func(f *Facts) Role {
 		if f.Rust == nil {
 			return 0

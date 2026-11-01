@@ -11,7 +11,8 @@ import (
 )
 
 var goProvider = provider{
-	name: "go",
+	name:     "go",
+	manifest: "go.mod",
 	detect: func(f *Facts) Role {
 		if f.Go == nil {
 			return 0

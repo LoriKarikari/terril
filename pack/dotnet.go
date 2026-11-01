@@ -8,7 +8,8 @@ import (
 )
 
 var dotnetProvider = provider{
-	name: "dotnet",
+	name:     "dotnet",
+	manifest: ".csproj file",
 	detect: func(f *Facts) Role {
 		if f.DotNet == nil {
 			return 0

@@ -3,7 +3,8 @@ package pack
 import "fmt"
 
 var staticProvider = provider{
-	name: "static",
+	name:     "static",
+	manifest: "index.html",
 	detect: func(f *Facts) Role {
 		if f.Has("index.html") {
 			return Fallback

@@ -6,7 +6,8 @@ import (
 )
 
 var phpProvider = provider{
-	name: "php",
+	name:     "php",
+	manifest: "index.php or public/index.php",
 	detect: func(f *Facts) Role {
 		if f.PHP == nil {
 			return 0

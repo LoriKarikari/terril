@@ -8,7 +8,8 @@ import (
 )
 
 var nodeProvider = provider{
-	name: "node",
+	name:     "node",
+	manifest: "package.json",
 	detect: func(f *Facts) Role {
 		if f.Node == nil {
 			return 0
