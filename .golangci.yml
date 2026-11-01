@@ -7,7 +7,7 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        - pattern: ^(os\.(Open|OpenFile|ReadFile|ReadDir|Stat|Lstat|DirFS)|filepath\.(Glob|Walk|WalkDir)|pack\.Facts\.(read|rootRead))$
+        - pattern: ^(os\.(Open|OpenFile|ReadFile|ReadDir|Stat|Lstat|DirFS)|filepath\.(Glob|Walk|WalkDir)|pack\.Facts\.(read|rootRead)|pack\.(firstLine|fileExists))$
           msg: providers read typed facts; read and parse the file in pack/facts.go
   exclusions:
     rules:

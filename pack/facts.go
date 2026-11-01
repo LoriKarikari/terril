@@ -492,10 +492,10 @@ func readPython(f *Facts) (*Python, error) {
 		py.Version = v
 	}
 	for _, file := range []string{"main.py", "app.py", "wsgi.py"} {
-		src, ok := f.read(file)
-		if !ok {
+		if !f.Has(file) {
 			continue
 		}
+		src, _ := f.read(file)
 		e := PythonEntry{File: file, Assigns: map[string]string{}}
 		for _, m := range assignCallRe.FindAllStringSubmatch(src, -1) {
 			if _, seen := e.Assigns[m[2]]; !seen {
