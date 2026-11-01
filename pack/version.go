@@ -60,8 +60,7 @@ var (
 	}}
 )
 
-// An exact version must not be past its end of life, but a version newer than the table passes,
-// so a new release builds before terril lists it. A range resolves to the default if it fits,
+// A version newer than the table passes, so a new release builds before terril lists it. A range resolves to the default if it fits,
 // otherwise to the newest supported version that fits.
 func (rv runtimeVersions) pick(want string, today time.Time) (string, error) {
 	want = strings.TrimSpace(want)

@@ -78,7 +78,6 @@ func TestMain(m *testing.M) {
 	if results.images > 0 {
 		fmt.Printf("total: %d images, pull %s MB, disk %s MB\n", results.images, mb(results.pull), mb(results.disk))
 	}
-	// Keeps recent layers so reruns stay fast, without the cache growing every run.
 	if !*keep {
 		if out, err := exec.Command("docker", "builder", "prune", "-f", "--max-used-space", "10GB").CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "e2e: trimming the build cache: %v: %s\n", err, out)
@@ -145,7 +144,7 @@ func fixtures(t *testing.T) []fixture {
 	return fs
 }
 
-// php-laravel and Rails apps have an app/ folder, not an app file.
+// Some apps have an app/ folder, not an app file.
 func readFile(dir, name string) (string, bool) {
 	p := filepath.Join(dir, name)
 	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
@@ -267,7 +266,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		t.Fatal(err)
 	}
 	r.pull, r.pullBytes = mb(pull), pull
-	eff, waste, err := dive(image)
+	eff, waste, err := dive(t, image)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,32 +418,25 @@ func countOutput(name string, args ...string) (int64, error) {
 
 func mb(bytes int64) string { return fmt.Sprintf("%.1f", float64(bytes)/1e6) }
 
-func dive(image string) (float64, float64, error) {
-	out, err := os.CreateTemp("", "dive-*.json")
-	if err != nil {
-		return 0, 0, err
-	}
-	if err := out.Close(); err != nil {
-		return 0, 0, err
-	}
-	defer os.Remove(out.Name()) //nolint:errcheck // a leftover temp file doesn't affect the result
-	if b, err := exec.Command("dive", "--ci", "--json", out.Name(), image).CombinedOutput(); err != nil {
+func dive(t *testing.T, image string) (float64, float64, error) {
+	report := filepath.Join(t.TempDir(), "dive.json")
+	if b, err := exec.Command("dive", "--ci", "--json", report, image).CombinedOutput(); err != nil {
 		return 0, 0, fmt.Errorf("dive: %w: %s", err, b)
 	}
-	b, err := os.ReadFile(out.Name())
+	b, err := os.ReadFile(report)
 	if err != nil {
 		return 0, 0, err
 	}
-	var report struct {
+	var r struct {
 		Image struct {
 			EfficiencyScore  float64 `json:"efficiencyScore"`
 			InefficientBytes float64 `json:"inefficientBytes"`
 		} `json:"image"`
 	}
-	if err := json.Unmarshal(b, &report); err != nil {
+	if err := json.Unmarshal(b, &r); err != nil {
 		return 0, 0, err
 	}
-	return math.Floor(report.Image.EfficiencyScore*10000) / 100, math.Floor(report.Image.InefficientBytes/1e5) / 10, nil
+	return math.Floor(r.Image.EfficiencyScore*10000) / 100, math.Floor(r.Image.InefficientBytes/1e5) / 10, nil
 }
 
 func shippedPackages(files, absent []string) []string {
@@ -624,7 +616,6 @@ func newLog(t *testing.T, name string) *os.File {
 	return log
 }
 
-// rerunSteps lists the RUN commands BuildKit ran instead of taking from its cache.
 func rerunSteps(out string) []string {
 	steps, cached := map[string]string{}, map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
@@ -667,7 +658,6 @@ func (f fixture) run(log *os.File, args ...string) (string, error) {
 	return out.String(), err
 }
 
-// A test app's today file fixes the date, so end-of-life tests don't change with the calendar.
 func (f fixture) terril(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, terril, args...)
 	if f.today != "" {

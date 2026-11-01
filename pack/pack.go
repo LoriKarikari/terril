@@ -20,9 +20,8 @@ type provider struct {
 	detect     func(*Facts) Role
 	plan       func(f *Facts, assetStages []string) ([]Stage, Runtime, error)
 	assetStage func(f *Facts, name string) (Stage, error)
-	// The runtime the image ships, for end-of-life warnings.
-	versions *runtimeVersions
-	version  func(*Facts) (string, error)
+	versions   *runtimeVersions
+	version    func(*Facts) (string, error)
 }
 
 var providers = []provider{goProvider, rustProvider, pythonProvider, rubyProvider, phpProvider, dotnetProvider, nodeProvider, staticProvider}

@@ -39,8 +39,7 @@ type nodeManager struct {
 	prune, cache        string
 	run, start, runFile string
 	exec                string
-	// Reinstalls only one workspace member's production dependency tree.
-	workspacePrune func(install, pkg string) string
+	workspacePrune      func(install, pkg string) string
 }
 
 // renovate: datasource=npm depName=corepack

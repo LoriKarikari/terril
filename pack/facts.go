@@ -21,9 +21,8 @@ import (
 type Facts struct {
 	Dir string
 	// The day to check end-of-life dates against.
-	Today     time.Time
-	Workspace *Workspace
-	// A uv workspace the Python app belongs to. Root is the build context.
+	Today       time.Time
+	Workspace   *Workspace
 	UvWorkspace *Workspace
 	Node        *Node
 	Python      *Python
@@ -291,7 +290,8 @@ func lockBins(lock string) (map[string]string, error) {
 	return bins, nil
 }
 
-// A JS workspace the app belongs to. Root is the build context.
+// A JS or uv workspace the app belongs to. Root is the build context. Members is only set for
+// a JS workspace.
 type Workspace struct {
 	Root    string
 	App     string
