@@ -3,6 +3,7 @@ package pack
 import (
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -125,27 +126,6 @@ func bunVersion(n *Node) string {
 	return "1"
 }
 
-// Bun's distroless image has no shell, so the start script must be one bun or node call.
-func distrolessBun(f *Facts) (string, []Env, Cmd, bool) {
-	if f.needsDebianRuntime() {
-		return "", nil, nil, false
-	}
-	var env []Env
-	start, err := nodeStart(f)
-	if err != nil {
-		return "", nil, nil, false
-	}
-	if script := f.Node.Package.Scripts["start"]; script != "" {
-		var args []string
-		var ok bool
-		if env, args, ok = directCommand(script); !ok || (args[0] != "bun" && args[0] != "node") || len(args) < 2 {
-			return "", nil, nil, false
-		}
-		start = append(Cmd{"bun"}, args[1:]...)
-	}
-	return "oven/bun:" + bunVersion(f.Node) + "-distroless", env, start, true
-}
-
 // Files in node_modules that Node never loads to run an app. License files stay, because
 // many licenses require shipping them. Type declarations stay when the app type-checks at
 // runtime.
@@ -176,6 +156,11 @@ func nodeVersion(f *Facts) (string, error) {
 func nodeImage(f *Facts) (string, error) {
 	v, err := nodeVersion(f)
 	return "node:" + v + "-trixie-slim", err
+}
+
+func distrolessNodeImage(f *Facts) string {
+	v, _ := nodeVersion(f)
+	return "gcr.io/distroless/nodejs" + v + "-debian13"
 }
 
 func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error) {
@@ -310,18 +295,15 @@ func nodeStart(f *Facts) (Cmd, error) {
 	return nil, fmt.Errorf("no start command: add a \"start\" script to package.json, or a server.js")
 }
 
-// Distroless has no shell or npm, so it only runs a start command that is a plain node call.
-// Distroless has no shell or npm, so the start script must be one node call, or one call to a
-// package bin that package-lock.json maps to a file. check verifies that file is a Node script.
-func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok bool) {
-	v, _ := nodeVersion(f)
-	if f.needsDebianRuntime() || nodeManagers[f.Node.Manager].runFile != "node" {
-		return "", nil, nil, nil, false
-	}
+// Distroless images have no shell or package manager, so the start script must be one call to
+// node, to bun on Bun, or to a package bin that package-lock.json maps to a file. check verifies
+// that file is a Node script.
+func nodeDistroless(f *Facts) (from string, env []Env, cmd Cmd, check *Run, ok bool) {
 	start, err := nodeStart(f)
-	if err != nil {
+	if err != nil || f.needsDebianRuntime() {
 		return "", nil, nil, nil, false
 	}
+	bun := f.Node.Manager == "bun"
 	if script := f.Node.Package.Scripts["start"]; script != "" {
 		var args []string
 		if env, args, ok = directCommand(script); !ok {
@@ -332,12 +314,15 @@ func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok 
 			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
 				"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}
 		}
-		if args[0] != "node" || len(args) < 2 {
+		if len(args) < 2 || args[0] != "node" && !(bun && args[0] == "bun") {
 			return "", nil, nil, nil, false
 		}
 		start = Cmd(args)
 	}
-	return "gcr.io/distroless/nodejs" + v + "-debian13", env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), check, true
+	if bun {
+		return "oven/bun:" + bunVersion(f.Node) + "-distroless", env, append(Cmd{"bun"}, start[1:]...), check, true
+	}
+	return distrolessNodeImage(f), env, append(Cmd{"/nodejs/bin/node"}, start[1:]...), check, true
 }
 
 func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -352,8 +337,8 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Env:    append([]Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}, fw.env...),
 			Cmd:    append(Cmd{"node"}, fw.cmd...),
 		}
-		if v, _ := nodeVersion(f); !f.needsDebianRuntime() {
-			rt.From = "gcr.io/distroless/nodejs" + v + "-debian13"
+		if !f.needsDebianRuntime() {
+			rt.From = distrolessNodeImage(f)
 			rt.Cmd[0] = "/nodejs/bin/node"
 		}
 		return []Stage{build}, rt, nil
@@ -387,19 +372,69 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Env:    env,
 		Cmd:    start,
 	}
-	if image, startEnv, cmd, check, ok := distrolessNode(f); ok {
-		rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
+	if from, startEnv, cmd, check, ok := nodeDistroless(f); ok {
+		rt.From, rt.Cmd, rt.Env = from, cmd, append(rt.Env, startEnv...)
 		if check != nil {
 			build.Steps = append(build.Steps, *check)
-		}
-	}
-	if f.Node.Manager == "bun" {
-		if image, startEnv, cmd, ok := distrolessBun(f); ok {
-			rt.From, rt.Cmd, rt.Env = image, cmd, append(rt.Env, startEnv...)
 		}
 	}
 	if f.Workspace != nil {
 		rt.Workdir = "/app/" + f.Workspace.App
 	}
 	return []Stage{build}, rt, nil
+}
+
+// A Node framework whose build output runs without node_modules.
+type nodeFramework struct {
+	dep string
+	// Start scripts that run the framework's own server. "" means no start script.
+	starts   []string
+	buildEnv []Env
+	copies   func(f *Facts) []Copy
+	env      []Env
+	// Arguments to node.
+	cmd Cmd
+}
+
+var nodeFrameworks = []nodeFramework{
+	{
+		dep:    "next",
+		starts: []string{"", "next start"},
+		// Undocumented, but the same as output: "standalone" in next.config.
+		buildEnv: []Env{{"NEXT_PRIVATE_STANDALONE", "true"}},
+		copies: func(f *Facts) []Copy {
+			copies := []Copy{
+				{From: "build", Src: []string{"/app/.next/standalone/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)},
+				{From: "build", Src: []string{"/app/.next/static/"}, Dst: "/app/.next/static/"},
+			}
+			if f.Has("public") {
+				copies = append(copies, Copy{From: "build", Src: []string{"/app/public/"}, Dst: "/app/public/"})
+			}
+			return copies
+		},
+		// Docker sets HOSTNAME to the container ID, and Next binds to it.
+		env: []Env{{"HOSTNAME", "0.0.0.0"}},
+		cmd: Cmd{"server.js"},
+	},
+	{
+		dep:    "nuxt",
+		starts: []string{"", "node .output/server/index.mjs"},
+		copies: func(f *Facts) []Copy {
+			return []Copy{{From: "build", Src: []string{"/app/.output/"}, Dst: "/app/.output/", Exclude: nodeModulesExcludes(f)}}
+		},
+		cmd: Cmd{".output/server/index.mjs"},
+	},
+}
+
+func nodeFrameworkFor(f *Facts) *nodeFramework {
+	n := f.Node
+	if f.Workspace != nil || n.PnP || nodeManagers[n.Manager].runFile != "node" || f.Start != "" {
+		return nil
+	}
+	for i, fw := range nodeFrameworks {
+		if n.Package.Dependencies[fw.dep] != "" && slices.Contains(fw.starts, n.Package.Scripts["start"]) {
+			return &nodeFrameworks[i]
+		}
+	}
+	return nil
 }
