@@ -25,7 +25,8 @@ type Plan struct {
 	// The registry path that serves Docker's official images, such as public.ecr.aws/docker/library.
 	// Empty pulls them from Docker Hub.
 	OfficialImages string
-	// Leaves out the syntax directive, for a builder whose own Dockerfile frontend is new enough.
+	// Leaves out the syntax directive. Only a builder whose own Dockerfile frontend knows
+	// COPY --parents and --exclude, such as Docker 29, can build the result.
 	NoSyntax bool
 }
 

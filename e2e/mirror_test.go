@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,14 @@ var imageRef = regexp.MustCompile(`(?m)^FROM (\S+)|--from=(\S+)`)
 
 // Built one at a time, because ECR Public allows one anonymous pull per second.
 func TestAppsFromOfficialImagesMirror(t *testing.T) {
+	out, err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	major, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
+	n, _ := strconv.Atoi(major)
+	noSyntax := n >= 29
+	t.Logf("Docker %s, NoSyntax %v", strings.TrimSpace(string(out)), noSyntax)
 	for _, f := range fixtures(t) {
 		if !slices.Contains([]string{"node-http", "python-uv", "php-laravel"}, f.name) {
 			continue
@@ -31,10 +40,10 @@ func TestAppsFromOfficialImagesMirror(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan.OfficialImages, plan.NoSyntax = officialImagesMirror, true
+			plan.OfficialImages, plan.NoSyntax = officialImagesMirror, noSyntax
 			dockerfile := plan.Dockerfile()
-			if strings.HasPrefix(dockerfile, "# syntax=") {
-				t.Fatalf("NoSyntax kept the syntax line:\n%s", dockerfile)
+			if strings.HasPrefix(dockerfile, "# syntax=") == noSyntax {
+				t.Fatalf("NoSyntax is %v, but the Dockerfile starts:\n%s", noSyntax, dockerfile[:min(len(dockerfile), 80)])
 			}
 
 			var stages, mirrored []string
