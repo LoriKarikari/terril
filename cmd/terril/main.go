@@ -26,8 +26,7 @@ const usage = `terril turns an app directory into a container image.
 running app. Without =VALUE it takes the value from the environment.
 `
 
-// Release builds set version with -ldflags. Other builds use the version Go records from the
-// module or the git commit.
+// Release builds set version with -ldflags.
 var version = ""
 
 func versionString() string {
@@ -51,11 +50,11 @@ func main() {
 		return
 	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	provider := fs.String("provider", "", "force the primary provider (go, python, node)")
+	provider := fs.String("provider", "", "force the primary provider: node, python, ruby, php, dotnet, rust, go or static")
 	tag := fs.String("t", "", "image tag (build only; default: directory name)")
 	var env envFlags
 	fs.Var(&env, "env", "build-time variable, KEY=VALUE or KEY (repeatable)")
-	_ = fs.Parse(os.Args[2:]) // ExitOnError exits instead of returning an error.
+	_ = fs.Parse(os.Args[2:])
 	if fs.NArg() != 1 || (cmd != "plan" && cmd != "build") {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

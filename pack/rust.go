@@ -28,8 +28,8 @@ const cargoChefAmd64 = "aca691abfbfbbe00d482e0ed2249eec3091b65e96a0ce92947fb5b25
 // renovate: datasource=github-release-attachments depName=LukeMathWalker/cargo-chef digestVersion=v0.1.78
 const cargoChefArm64 = "cd59b90fce5fa84c4189648fec33404ec5491791eebdb812df5e7fca8336408d"
 
-// The build stage installs the toolchain file's Rust in its own layer, so a source edit doesn't
-// download it again.
+// With a toolchain file in its source, the planner would download that Rust on every source edit.
+// The build stage installs it from the file, in its own layer.
 var rustExcludes = append(slices.Clone(sourceExcludes), "**/target", "rust-toolchain", "rust-toolchain.toml")
 
 func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
@@ -50,8 +50,8 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Run{Cmd: "cargo chef prepare --recipe-path /recipe.json"},
 		}},
 	}
-	pkg := shellQuote([]string{r.Package})
-	bin := shellQuote([]string{r.Bin})
+	pkg := shellQuote(r.Package)
+	bin := shellQuote(r.Bin)
 	var steps []Step
 	// Docker Hub has trixie images only for Rust 1.88 and newer, and none for nightlies. rustup
 	// installs any toolchain, with the targets and components the file lists.

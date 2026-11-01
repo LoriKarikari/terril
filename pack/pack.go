@@ -11,6 +11,8 @@ type Role uint8
 const (
 	Primary Role = 1 << iota
 	Assets
+	// Fallback runs the app when no provider has the Primary role.
+	Fallback
 )
 
 type provider struct {
@@ -18,9 +20,8 @@ type provider struct {
 	detect     func(*Facts) Role
 	plan       func(f *Facts, assetStages []string) ([]Stage, Runtime, error)
 	assetStage func(f *Facts, name string) (Stage, error)
-	// The runtime the image ships, for end-of-life warnings.
-	versions *runtimeVersions
-	version  func(*Facts) (string, error)
+	versions   *runtimeVersions
+	version    func(*Facts) (string, error)
 }
 
 var providers = []provider{goProvider, rustProvider, pythonProvider, rubyProvider, phpProvider, dotnetProvider, nodeProvider, staticProvider}
@@ -56,8 +57,8 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 		plan.Context = ws.Root
 	}
 	var assetNames []string
-	for _, p := range providers {
-		if p.name == primary.name || roles[p.name]&Assets == 0 {
+	for _, p := range withRole(roles, Assets) {
+		if p.name == primary.name {
 			continue
 		}
 		name := "assets-" + p.name
@@ -91,13 +92,18 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	if f.Start != "" {
 		plan.Runtime.Cmd = Cmd{"sh", "-c", f.Start}
 	}
-	if build := append(f.Config.Packages, f.Config.BuildPackages...); len(build) > 0 {
+	if build := slices.Concat(f.Config.Packages, f.Config.BuildPackages); len(build) > 0 {
 		for i := range plan.Stages {
 			plan.Stages[i].Steps = append([]Step{aptInstall(build)}, plan.Stages[i].Steps...)
 		}
 	}
 	plan.Runtime.Packages = f.Config.Packages
 	return plan, nil
+}
+
+// Distroless images have no shell for a custom start command and no apt for packages.
+func (f *Facts) needsDebianRuntime() bool {
+	return f.Start != "" || len(f.Config.Packages) > 0
 }
 
 func pickPrimary(roles map[string]Role, force string) (provider, error) {
@@ -110,11 +116,9 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 		return provider{}, fmt.Errorf("unknown provider %q (have: %s)", force, strings.Join(providerNames(), ", "))
 	}
 
-	var candidates []provider
-	for _, p := range providers {
-		if roles[p.name]&Primary != 0 {
-			candidates = append(candidates, p)
-		}
+	candidates := withRole(roles, Primary)
+	if len(candidates) == 0 {
+		candidates = withRole(roles, Fallback)
 	}
 	// So a Python app with a package.json runs as Python, with Node building its assets.
 	if slices.ContainsFunc(candidates, func(p provider) bool { return roles[p.name]&Assets == 0 }) {
@@ -141,4 +145,14 @@ func providerNames() []string {
 		names = append(names, p.name)
 	}
 	return names
+}
+
+func withRole(roles map[string]Role, r Role) []provider {
+	var ps []provider
+	for _, p := range providers {
+		if roles[p.name]&r != 0 {
+			ps = append(ps, p)
+		}
+	}
+	return ps
 }
