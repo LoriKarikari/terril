@@ -3,7 +3,7 @@ package pack
 import (
 	"fmt"
 	goversion "go/version"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 
@@ -45,7 +45,7 @@ func goImageVersion(m *modfile.File) string {
 
 func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	version := goImageVersion(f.Go)
-	pkg, err := goMainPackage(f)
+	pkg, err := goMainPackage(f.GoMains)
 	if err != nil {
 		return nil, Runtime{}, err
 	}
@@ -91,21 +91,16 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}, nil
 }
 
-func goMainPackage(f *Facts) (string, error) {
-	if f.Has("main.go") {
-		return ".", nil
-	}
-	dirs, _ := filepath.Glob(filepath.Join(f.Dir, "cmd", "*", "main.go"))
-	switch len(dirs) {
+func goMainPackage(mains []string) (string, error) {
+	switch len(mains) {
 	case 0:
 		return "", fmt.Errorf("no main package: add main.go or cmd/<name>/main.go")
 	case 1:
-		rel, _ := filepath.Rel(f.Dir, filepath.Dir(dirs[0]))
-		return "./" + filepath.ToSlash(rel), nil
+		return mains[0], nil
 	}
 	var names []string
-	for _, d := range dirs {
-		names = append(names, filepath.Base(filepath.Dir(d)))
+	for _, m := range mains {
+		names = append(names, path.Base(m))
 	}
 	return "", fmt.Errorf("several main packages in cmd/ (%s); add a main.go at the root to pick one", strings.Join(names, ", "))
 }

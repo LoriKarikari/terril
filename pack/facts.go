@@ -33,7 +33,9 @@ type Facts struct {
 	Rust        *Rust
 	Go          *modfile.File
 	GoCgo       bool
-	Config      Config
+	// "." when main.go is at the root, otherwise ./cmd/<name> for each cmd/<name>/main.go.
+	GoMains []string
+	Config  Config
 	// From terril.toml, else the Procfile web: line.
 	Start string
 }
@@ -69,6 +71,8 @@ type Node struct {
 	PnP            bool
 	// Production bin names from package-lock.json, mapped to their file under node_modules.
 	Bins map[string]string
+	// Where vite build writes, from vite.config. Empty when vite isn't a dependency.
+	ViteOutDir string
 }
 
 type PackageJSON struct {
@@ -89,6 +93,19 @@ type Python struct {
 	Requirements []string
 	Deps         map[string]bool
 	Version      string
+	// main.py, app.py and wsgi.py, in that order, when the app has them.
+	Entries []PythonEntry
+	// The package manage.py's DJANGO_SETTINGS_MODULE names, such as mysite.
+	DjangoProject string
+	// The Django project's settings.py sets STATIC_ROOT, which collectstatic needs.
+	DjangoStaticRoot bool
+}
+
+type PythonEntry struct {
+	File string
+	// The first variable each call at the top of the file is assigned to, such as
+	// "FastAPI": "app" for app = FastAPI().
+	Assigns map[string]string
 }
 
 type PHP struct {
@@ -127,8 +144,7 @@ type Ruby struct {
 }
 
 func (f *Facts) Has(name string) bool {
-	_, err := os.Stat(filepath.Join(f.Dir, name))
-	return err == nil
+	return fileExists(filepath.Join(f.Dir, name))
 }
 
 func (f *Facts) read(name string) (string, bool) {
@@ -144,8 +160,7 @@ func (f *Facts) root() string {
 }
 
 func (f *Facts) rootHas(name string) bool {
-	_, err := os.Stat(filepath.Join(f.root(), name))
-	return err == nil
+	return fileExists(filepath.Join(f.root(), name))
 }
 
 func (f *Facts) rootRead(name string) (string, bool) {
@@ -153,13 +168,18 @@ func (f *Facts) rootRead(name string) (string, bool) {
 	return string(b), err == nil
 }
 
-func (f *Facts) firstLine(names ...string) string {
+func firstLine(dir string, names ...string) string {
 	for _, n := range names {
-		if s, ok := f.read(n); ok {
-			return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
+		if b, err := os.ReadFile(filepath.Join(dir, n)); err == nil {
+			return strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
 		}
 	}
 	return ""
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func Read(dir string) (*Facts, error) {
@@ -205,7 +225,7 @@ func Read(dir string) (*Facts, error) {
 		}
 		f.Python.Manager = "uv"
 		if f.Python.Version == "" {
-			f.Python.Version = (&Facts{Dir: ws.Root}).firstLine(".python-version")
+			f.Python.Version = firstLine(ws.Root, ".python-version")
 		}
 	}
 	if s, ok := f.read("go.mod"); ok {
@@ -215,6 +235,7 @@ func Read(dir string) (*Facts, error) {
 		if f.GoCgo, err = goUsesCgo(f); err != nil {
 			return nil, err
 		}
+		f.GoMains = goMains(f)
 	}
 	if s, ok := f.read("Procfile"); ok {
 		f.Start = procfileWeb(s)
@@ -247,7 +268,6 @@ func readNode(f *Facts) (*Node, error) {
 		return nil, nil
 	}
 	n := &Node{}
-	var err error
 	if err := json.Unmarshal([]byte(s), &n.Package); err != nil {
 		return nil, fmt.Errorf("package.json: %w", err)
 	}
@@ -258,12 +278,14 @@ func readNode(f *Facts) (*Node, error) {
 		}
 	}
 	pm := n.Package.PackageManager
-	if rootPkg, ok := f.rootRead("package.json"); ok && pm == "" && f.Workspace != nil {
-		var root PackageJSON
-		if err := json.Unmarshal([]byte(rootPkg), &root); err != nil {
-			return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), "package.json"), err)
+	if pm == "" && f.Workspace != nil {
+		if rootPkg, ok := f.rootRead("package.json"); ok {
+			var root PackageJSON
+			if err := json.Unmarshal([]byte(rootPkg), &root); err != nil {
+				return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), "package.json"), err)
+			}
+			pm = root.PackageManager
 		}
-		pm = root.PackageManager
 	}
 	// packageManager looks like "pnpm@10.4.1+sha512.abc".
 	if pm != "" {
@@ -280,28 +302,49 @@ func readNode(f *Facts) (*Node, error) {
 	}
 	if n.Lockfile == "package-lock.json" && f.Workspace == nil {
 		lock, _ := f.read("package-lock.json")
+		var err error
 		if n.Bins, err = lockBins(lock); err != nil {
 			return nil, err
 		}
 	}
 	if n.Manager == "yarn" {
 		lock, _ := f.rootRead("yarn.lock")
-		yarnrc, _ := f.rootRead(".yarnrc.yml")
-		if f.rootHas(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || !strings.HasPrefix(n.ManagerVersion+"1", "1") {
+		major, _, _ := strings.Cut(n.ManagerVersion, ".")
+		if f.rootHas(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || major != "" && major != "1" {
 			n.Manager = "yarn-berry"
-			n.PnP = !nodeLinkerRe.MatchString(yarnrc)
+			var yarnrc struct {
+				NodeLinker string `yaml:"nodeLinker"`
+			}
+			if s, ok := f.rootRead(".yarnrc.yml"); ok {
+				if err := yaml.Unmarshal([]byte(s), &yarnrc); err != nil {
+					return nil, fmt.Errorf("%s: %w", filepath.Join(f.root(), ".yarnrc.yml"), err)
+				}
+			}
+			n.PnP = yarnrc.NodeLinker != "node-modules" && yarnrc.NodeLinker != "pnpm"
 		}
 	}
-	n.Version = strings.TrimPrefix(f.firstLine(".nvmrc", ".node-version"), "v")
+	n.Version = strings.TrimPrefix(firstLine(f.Dir, ".nvmrc", ".node-version"), "v")
 	if n.Version == "" && f.Workspace != nil {
-		root := &Facts{Dir: f.Workspace.Root}
-		n.Version = strings.TrimPrefix(root.firstLine(".nvmrc", ".node-version"), "v")
+		n.Version = strings.TrimPrefix(firstLine(f.Workspace.Root, ".nvmrc", ".node-version"), "v")
 	}
 	if n.Version == "" || strings.HasPrefix(n.Version, "lts") {
 		n.Version = n.Package.Engines.Node
 	}
+	pkg := n.Package
+	if pkg.Dependencies["vite"] != "" || pkg.DevDependencies["vite"] != "" {
+		n.ViteOutDir = "dist"
+		for _, name := range []string{"vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs"} {
+			src, _ := f.read(name)
+			if m := viteOutDirRe.FindStringSubmatch(src); m != nil {
+				n.ViteOutDir = path.Clean(m[1])
+				break
+			}
+		}
+	}
 	return n, nil
 }
+
+var viteOutDirRe = regexp.MustCompile(`outDir:\s*["']([^"']+)["']`)
 
 // findWorkspace walks up from an app to the JS workspace that lists it, stopping at the repo root.
 func findWorkspace(dir string) (*Workspace, error) {
@@ -325,7 +368,7 @@ func findWorkspace(dir string) (*Workspace, error) {
 			slices.Sort(dirs)
 			return &Workspace{Root: parent, App: rel, Members: members, Dirs: dirs}, err
 		}
-		if _, err := os.Stat(filepath.Join(parent, ".git")); err == nil || parent == filepath.Dir(parent) {
+		if fileExists(filepath.Join(parent, ".git")) || parent == filepath.Dir(parent) {
 			return nil, nil
 		}
 	}
@@ -514,9 +557,17 @@ func goUsesCgo(f *Facts) (bool, error) {
 	return found, err
 }
 
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
+func goMains(f *Facts) []string {
+	if f.Has("main.go") {
+		return []string{"."}
+	}
+	files, _ := filepath.Glob(filepath.Join(f.Dir, "cmd", "*", "main.go"))
+	var mains []string
+	for _, file := range files {
+		rel, _ := filepath.Rel(f.Dir, filepath.Dir(file))
+		mains = append(mains, "./"+filepath.ToSlash(rel))
+	}
+	return mains
 }
 
 func lockBins(lock string) (map[string]string, error) {
@@ -602,7 +653,7 @@ func readRuby(f *Facts) (*Ruby, error) {
 		return nil, fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
 			strings.Join(platforms, ", "))
 	}
-	if v := f.firstLine(".ruby-version"); v != "" {
+	if v := firstLine(f.Dir, ".ruby-version"); v != "" {
 		r.Version = rubyVersionNumber.FindString(v)
 	} else if v := sections["RUBY VERSION"]; len(v) > 1 {
 		r.Version = rubyVersionNumber.FindString(v[1])
@@ -611,8 +662,6 @@ func readRuby(f *Facts) (*Ruby, error) {
 	}
 	return r, nil
 }
-
-var nodeLinkerRe = regexp.MustCompile(`(?m)^nodeLinker:\s*["']?(node-modules|pnpm)`)
 
 func readPython(f *Facts) (*Python, error) {
 	py := &Python{Manager: "pip", Deps: map[string]bool{}}
@@ -659,11 +708,36 @@ func readPython(f *Facts) (*Python, error) {
 	case f.Has("poetry.lock"):
 		py.Manager = "poetry"
 	}
-	if v := f.firstLine(".python-version"); v != "" {
+	if v := firstLine(f.Dir, ".python-version"); v != "" {
 		py.Version = v
+	}
+	for _, file := range []string{"main.py", "app.py", "wsgi.py"} {
+		src, ok := f.read(file)
+		if !ok {
+			continue
+		}
+		e := PythonEntry{File: file, Assigns: map[string]string{}}
+		for _, m := range assignCallRe.FindAllStringSubmatch(src, -1) {
+			if _, seen := e.Assigns[m[2]]; !seen {
+				e.Assigns[m[2]] = m[1]
+			}
+		}
+		py.Entries = append(py.Entries, e)
+	}
+	manage, _ := f.read("manage.py")
+	if m := djangoSettingsRe.FindStringSubmatch(manage); m != nil {
+		py.DjangoProject = m[1]
+		settings, _ := f.read(path.Join(strings.ReplaceAll(m[1], ".", "/"), "settings.py"))
+		py.DjangoStaticRoot = staticRootRe.MatchString(settings)
 	}
 	return py, nil
 }
+
+var (
+	assignCallRe     = regexp.MustCompile(`(?m)^(\w+)\s*=\s*(\w+)\(`)
+	djangoSettingsRe = regexp.MustCompile(`DJANGO_SETTINGS_MODULE["']\s*,\s*["']([\w.]+)\.settings["']`)
+	staticRootRe     = regexp.MustCompile(`(?m)^STATIC_ROOT\s*=`)
+)
 
 var distNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*`)
 var normalizeRe = regexp.MustCompile(`[-_.]+`)

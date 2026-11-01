@@ -2,8 +2,6 @@ package pack
 
 import (
 	"fmt"
-	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -139,7 +137,8 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		steps = append(steps, copySource())
 	}
 	steps = append(steps, copyAssets(assets)...)
-	if djangoCollectsStatic(f) {
+	// collectstatic exits with an error when STATIC_ROOT is unset.
+	if py.Deps["django"] && py.DjangoStaticRoot {
 		cmd := "python manage.py collectstatic --noinput"
 		if ws := f.UvWorkspace; ws != nil {
 			cmd = "cd " + shellQuote(ws.App) + " && " + cmd
@@ -147,7 +146,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		steps = append(steps, Run{Cmd: cmd})
 	}
 
-	start, err := pythonStart(f)
+	start, err := pythonStart(py)
 	if err != nil && f.Start == "" {
 		return nil, Runtime{}, err
 	}
@@ -174,74 +173,47 @@ const withPort = "import os, sys; os.execvp(sys.argv[1], sys.argv[1:] + ['--port
 var pythonFrameworks = []struct {
 	name, dep, server string
 	cmd               func(module string) Cmd
-	module            func(f *Facts) string
+	module            func(py *Python) string
 }{
 	{"Django", "django", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, djangoWSGI},
-	{"FastAPI", "fastapi", "uvicorn", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }, appVariable("FastAPI")},
-	{"Flask", "flask", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, appVariable("Flask")},
+	{"FastAPI", "fastapi", "uvicorn", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }, appObject("FastAPI")},
+	{"Flask", "flask", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, appObject("Flask")},
 }
 
-var pythonEntries = []string{"main.py", "app.py", "wsgi.py"}
-
-func pythonStart(f *Facts) (Cmd, error) {
+func pythonStart(py *Python) (Cmd, error) {
 	for _, fw := range pythonFrameworks {
-		if !f.Python.Deps[fw.dep] {
+		if !py.Deps[fw.dep] {
 			continue
 		}
-		module := fw.module(f)
+		module := fw.module(py)
 		if module == "" {
 			continue
 		}
-		if !f.Python.Deps[fw.server] {
+		if !py.Deps[fw.server] {
 			return nil, fmt.Errorf("this is a %s app but %s isn't in its dependencies; add %s", fw.name, fw.server, fw.server)
 		}
 		return fw.cmd(module), nil
 	}
-	for _, file := range pythonEntries {
-		if f.Has(file) {
-			return Cmd{"python", file}, nil
-		}
+	if len(py.Entries) > 0 {
+		return Cmd{"python", py.Entries[0].File}, nil
 	}
 	return nil, fmt.Errorf("no start command: add a main.py, or a Procfile with a web: line")
 }
 
-func appVariable(constructor string) func(*Facts) string {
-	re := regexp.MustCompile(`(?m)^(\w+)\s*=\s*` + constructor + `\(`)
-	return func(f *Facts) string {
-		for _, file := range pythonEntries {
-			src, _ := f.read(file)
-			if m := re.FindStringSubmatch(src); m != nil {
-				return strings.TrimSuffix(file, ".py") + ":" + m[1]
+func appObject(call string) func(*Python) string {
+	return func(py *Python) string {
+		for _, e := range py.Entries {
+			if v := e.Assigns[call]; v != "" {
+				return strings.TrimSuffix(e.File, ".py") + ":" + v
 			}
 		}
 		return ""
 	}
 }
 
-var djangoSettingsRe = regexp.MustCompile(`DJANGO_SETTINGS_MODULE["']\s*,\s*["']([\w.]+)\.settings["']`)
-var staticRootRe = regexp.MustCompile(`(?m)^STATIC_ROOT\s*=`)
-
-func djangoProject(f *Facts) string {
-	src, _ := f.read("manage.py")
-	if m := djangoSettingsRe.FindStringSubmatch(src); m != nil {
-		return m[1]
+func djangoWSGI(py *Python) string {
+	if py.DjangoProject == "" {
+		return ""
 	}
-	return ""
-}
-
-func djangoWSGI(f *Facts) string {
-	if p := djangoProject(f); p != "" {
-		return p + ".wsgi"
-	}
-	return ""
-}
-
-// collectstatic exits with an error when STATIC_ROOT is unset.
-func djangoCollectsStatic(f *Facts) bool {
-	p := djangoProject(f)
-	if p == "" || !f.Python.Deps["django"] {
-		return false
-	}
-	settings, _ := f.read(filepath.Join(strings.ReplaceAll(p, ".", "/"), "settings.py"))
-	return staticRootRe.MatchString(settings)
+	return py.DjangoProject + ".wsgi"
 }

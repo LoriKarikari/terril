@@ -75,7 +75,7 @@ var nodeManagers = map[string]nodeManager{
 		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
 		run: "pnpm run", start: "npm start", runFile: "node", exec: "pnpm exec",
 		workspacePrune: func(install, pkg string) string {
-			return install + " --prod --filter " + shellQuote(pkg + "...")
+			return install + " --prod --filter " + shellQuote(pkg+"...")
 		},
 	},
 	"yarn": {
@@ -264,7 +264,7 @@ func workspaceBuild(f *Facts, m nodeManager) (string, error) {
 	case f.rootHas("turbo.json"):
 		return m.exec + " turbo run build --filter=" + shellQuote(name), nil
 	case f.Node.Manager == "pnpm":
-		return "pnpm --filter " + shellQuote(name + "...") + " run build", nil
+		return "pnpm --filter " + shellQuote(name+"...") + " run build", nil
 	}
 	var builds []string
 	for _, dir := range buildOrder(f.Workspace.Members, name) {
@@ -330,7 +330,7 @@ func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok 
 		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
 			args = append([]string{"node", bin}, args[1:]...)
 			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
-				"echo " + shellQuote("terril: " + bin + " isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}
+				"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}
 		}
 		if args[0] != "node" || len(args) < 2 {
 			return "", nil, nil, nil, false
@@ -364,8 +364,8 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	start, err := nodeStart(f)
 	if err != nil && f.Start == "" {
-		out := viteOutDir(f)
-		if out == "" {
+		out := f.Node.ViteOutDir
+		if out == "" || f.Node.Package.Scripts["build"] == "" {
 			return nil, Runtime{}, err
 		}
 		app := ""
