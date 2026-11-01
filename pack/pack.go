@@ -93,8 +93,15 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 		plan.Runtime.Cmd = Cmd{"sh", "-c", f.Start}
 	}
 	if build := slices.Concat(f.Config.Packages, f.Config.BuildPackages); len(build) > 0 {
-		for i := range plan.Stages {
-			plan.Stages[i].Steps = append([]Step{aptInstall(build)}, plan.Stages[i].Steps...)
+		var names []string
+		for _, s := range plan.Stages {
+			names = append(names, s.Name)
+		}
+		// scratch has no apt, and a stage built from another stage already has the packages.
+		for i, s := range plan.Stages {
+			if isImage(s.From, names) {
+				plan.Stages[i].Steps = append([]Step{aptInstall(build)}, s.Steps...)
+			}
 		}
 	}
 	plan.Runtime.Packages = f.Config.Packages
