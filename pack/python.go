@@ -100,7 +100,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			for _, dir := range ws.Dirs {
 				manifests = append(manifests, dir+"/pyproject.toml")
 			}
-			sync := "uv sync --frozen --no-dev --package " + shellQuote([]string{py.Name})
+			sync := "uv sync --frozen --no-dev --package " + shellQuote(py.Name)
 			steps = append(steps,
 				Copy{Src: manifests, Dst: "./", Parents: true},
 				Run{Cmd: sync + " --no-install-workspace", Caches: uvCache},
@@ -122,7 +122,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 				Copy{Src: []string{"requirements.txt"}, Dst: "./"},
 				Run{Cmd: "uv pip install -r requirements.txt", Caches: uvCache})
 		} else if len(py.Requirements) > 0 {
-			steps = append(steps, Run{Cmd: "uv pip install " + shellQuote(py.Requirements), Caches: uvCache})
+			steps = append(steps, Run{Cmd: "uv pip install " + shellQuote(py.Requirements...), Caches: uvCache})
 		}
 	case "poetry":
 		steps = append(steps,
@@ -142,7 +142,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if djangoCollectsStatic(f) {
 		cmd := "python manage.py collectstatic --noinput"
 		if ws := f.UvWorkspace; ws != nil {
-			cmd = "cd " + shellQuote([]string{ws.App}) + " && " + cmd
+			cmd = "cd " + shellQuote(ws.App) + " && " + cmd
 		}
 		steps = append(steps, Run{Cmd: cmd})
 	}
@@ -244,12 +244,4 @@ func djangoCollectsStatic(f *Facts) bool {
 	}
 	settings, _ := f.read(filepath.Join(strings.ReplaceAll(p, ".", "/"), "settings.py"))
 	return staticRootRe.MatchString(settings)
-}
-
-func shellQuote(args []string) string {
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-	}
-	return strings.Join(quoted, " ")
 }

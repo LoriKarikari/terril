@@ -59,7 +59,7 @@ var nodeManagers = map[string]nodeManager{
 		prune: "npm prune --omit=dev", cache: "/root/.npm",
 		run: "npm run", start: "npm start", runFile: "node", exec: "npx",
 		workspacePrune: func(install, pkg string) string {
-			return install + " --omit=dev --include-workspace-root --workspace=" + shellQuote([]string{pkg})
+			return install + " --omit=dev --include-workspace-root --workspace=" + shellQuote(pkg)
 		},
 	},
 	"pnpm": {
@@ -75,7 +75,7 @@ var nodeManagers = map[string]nodeManager{
 		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
 		run: "pnpm run", start: "npm start", runFile: "node", exec: "pnpm exec",
 		workspacePrune: func(install, pkg string) string {
-			return install + " --prod --filter " + shellQuote([]string{pkg + "..."})
+			return install + " --prod --filter " + shellQuote(pkg + "...")
 		},
 	},
 	"yarn": {
@@ -97,7 +97,7 @@ var nodeManagers = map[string]nodeManager{
 		run:   "yarn run", start: "npm start", runFile: "node", exec: "yarn",
 		// focus leaves unused zips in the cache, so it refills an empty one.
 		workspacePrune: func(_, pkg string) string {
-			return "rm -rf .yarn/cache && yarn workspaces focus --production " + shellQuote([]string{pkg})
+			return "rm -rf .yarn/cache && yarn workspaces focus --production " + shellQuote(pkg)
 		},
 	},
 	"bun": {
@@ -106,7 +106,7 @@ var nodeManagers = map[string]nodeManager{
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
 		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
 		workspacePrune: func(install, pkg string) string {
-			return install + " --production --filter " + shellQuote([]string{pkg})
+			return install + " --production --filter " + shellQuote(pkg)
 		},
 	},
 }
@@ -262,13 +262,13 @@ func workspaceBuild(f *Facts, m nodeManager) (string, error) {
 	}
 	switch {
 	case f.rootHas("turbo.json"):
-		return m.exec + " turbo run build --filter=" + shellQuote([]string{name}), nil
+		return m.exec + " turbo run build --filter=" + shellQuote(name), nil
 	case f.Node.Manager == "pnpm":
-		return "pnpm --filter " + shellQuote([]string{name + "..."}) + " run build", nil
+		return "pnpm --filter " + shellQuote(name + "...") + " run build", nil
 	}
 	var builds []string
 	for _, dir := range buildOrder(f.Workspace.Members, name) {
-		builds = append(builds, "(cd "+shellQuote([]string{dir})+" && "+m.run+" build)")
+		builds = append(builds, "(cd "+shellQuote(dir)+" && "+m.run+" build)")
 	}
 	return strings.Join(builds, " && "), nil
 }
@@ -329,8 +329,8 @@ func distrolessNode(f *Facts) (image string, env []Env, cmd Cmd, check *Run, ok 
 		}
 		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
 			args = append([]string{"node", bin}, args[1:]...)
-			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote([]string{bin}) + ")\" in '#!'*node*) ;; *) " +
-				"echo " + shellQuote([]string{"terril: " + bin + " isn't a Node script, so it can't run on distroless; set start in terril.toml"}) + " >&2; exit 1;; esac"}
+			check = &Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
+				"echo " + shellQuote("terril: " + bin + " isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}
 		}
 		if args[0] != "node" || len(args) < 2 {
 			return "", nil, nil, nil, false

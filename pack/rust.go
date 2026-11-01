@@ -50,8 +50,8 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Run{Cmd: "cargo chef prepare --recipe-path /recipe.json"},
 		}},
 	}
-	pkg := shellQuote([]string{r.Package})
-	bin := shellQuote([]string{r.Bin})
+	pkg := shellQuote(r.Package)
+	bin := shellQuote(r.Bin)
 	var steps []Step
 	// Docker Hub has trixie images only for Rust 1.88 and newer, and none for nightlies. rustup
 	// installs any toolchain, with the targets and components the file lists.

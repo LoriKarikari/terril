@@ -69,3 +69,11 @@ func literal(w *syntax.Word) (string, bool) {
 	}
 	return b.String(), true
 }
+
+func shellQuote(args ...string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	return strings.Join(quoted, " ")
+}

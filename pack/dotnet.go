@@ -74,7 +74,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			manifests = append(manifests, name)
 		}
 	}
-	restore := "dotnet restore " + shellQuote([]string{d.Project})
+	restore := "dotnet restore " + shellQuote(d.Project)
 	if f.Has(path.Join(path.Dir(d.Project), "packages.lock.json")) {
 		manifests = append(manifests, path.Join(path.Dir(d.Project), "packages.lock.json"))
 		restore += " --locked-mode"
@@ -90,7 +90,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Copy{Src: []string{"."}, Dst: "./", Exclude: append(slices.Clone(sourceExcludes), "**/bin", "**/obj")},
 	}
 	steps = append(steps, copyAssets(assets)...)
-	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote([]string{d.Project}) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
+	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote(d.Project) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
 
 	hook := Stage{Name: "port-hook", From: dotnetImages + "sdk:" + version, Workdir: "/hook", Steps: []Step{
 		Env{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"},
