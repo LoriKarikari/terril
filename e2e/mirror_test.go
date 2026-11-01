@@ -15,7 +15,10 @@ import (
 
 const officialImagesMirror = "public.ecr.aws/docker/library"
 
-var imageRef = regexp.MustCompile(`(?m)^FROM (\S+)|--from=(\S+)`)
+var (
+	imageRefRe  = regexp.MustCompile(`(?m)^FROM (\S+)|--from=(\S+)`)
+	stageNameRe = regexp.MustCompile(`(?m) AS (\S+)$`)
+)
 
 // Built one at a time, because ECR Public allows one anonymous pull per second.
 func TestAppsFromOfficialImagesMirror(t *testing.T) {
@@ -47,10 +50,10 @@ func TestAppsFromOfficialImagesMirror(t *testing.T) {
 			}
 
 			var stages, mirrored []string
-			for _, m := range regexp.MustCompile(`(?m) AS (\S+)$`).FindAllStringSubmatch(dockerfile, -1) {
+			for _, m := range stageNameRe.FindAllStringSubmatch(dockerfile, -1) {
 				stages = append(stages, m[1])
 			}
-			for _, m := range imageRef.FindAllStringSubmatch(dockerfile, -1) {
+			for _, m := range imageRefRe.FindAllStringSubmatch(dockerfile, -1) {
 				ref := m[1] + m[2]
 				host, _, hasHost := strings.Cut(ref, "/")
 				switch {

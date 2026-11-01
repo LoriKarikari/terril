@@ -54,15 +54,12 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.Has("go.sum") {
 		mods = append(mods, "go.sum")
 	}
+	download := Run{Cmd: "go mod download", Caches: []string{"/go/pkg/mod"}}
 	caches := []string{"/go/pkg/mod", "/root/.cache/go-build"}
-	steps := []Step{
-		Copy{Src: mods, Dst: "./"},
-		Run{Cmd: "go mod download", Caches: caches[:1]},
-		copySource(),
-	}
+	steps := []Step{Copy{Src: mods, Dst: "./"}, download, copySource()}
 	// A replace with a local path needs that folder before modules can download.
 	if slices.ContainsFunc(f.Go.Replace, func(r *modfile.Replace) bool { return modfile.IsDirectoryPath(r.New.Path) }) {
-		steps = []Step{copySource(), Run{Cmd: "go mod download", Caches: caches[:1]}}
+		steps = []Step{copySource(), download}
 	}
 	steps = append(steps, copyAssets(assets)...)
 

@@ -293,7 +293,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m := regexp.MustCompile(`(?m)^# terril: (.*)$`).FindSubmatch(plan); m != nil {
+	if m := summaryRe.FindSubmatch(plan); m != nil {
 		r.provider = string(m[1])
 	}
 	user, err := exec.Command("docker", "image", "inspect", "-f", "{{.Config.User}}", image).Output()
@@ -531,6 +531,8 @@ func TestCache(t *testing.T) {
 		})
 	}
 }
+
+var summaryRe = regexp.MustCompile(`(?m)^# terril: (.*)$`)
 
 var (
 	installRe = regexp.MustCompile(`install|uv sync|npm ci|go mod download|dotnet restore|cargo chef cook`)

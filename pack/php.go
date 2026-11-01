@@ -72,7 +72,7 @@ const frankenphpCaddyfile = `{
 `
 
 func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
-	if f.Start != "" || len(f.Config.Packages) > 0 {
+	if f.needsDebianRuntime() {
 		return nil, Runtime{}, fmt.Errorf("PHP apps run on a distroless image with FrankenPHP, which has no shell or apt; remove start and packages from terril.toml")
 	}
 	var stages []Stage
