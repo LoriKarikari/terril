@@ -25,13 +25,13 @@ var phpProvider = provider{
 // week before proposing a release for that reason.
 //
 // renovate: datasource=github-releases depName=php/frankenphp
-const frankenphpVersion = "v1.13.3"
+const frankenphpVersion = "v1.13.4"
 
-// renovate: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.3
-const frankenphpAmd64 = "f88db9972ddac5e4c097c8b703e585255e181411687e5a1f79ca4b6328526e0b"
+// renovate: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.4
+const frankenphpAmd64 = "88e4229fb48167418e50bc29b94df5a4f83801ec70ea6637ed44bf0527e74c29"
 
-// renovate: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.3
-const frankenphpArm64 = "73bd5e8b82cb48e52c49ec124f1eba03bfa5608365c770372606ec4846fb929e"
+// renovate: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.4
+const frankenphpArm64 = "c405bbb9c6561381109a12c5707ec71109f098423c3c935667543c2c443e37f8"
 
 var frankenphpBuilds = []struct{ arch, asset, sha256 string }{
 	{"amd64", "x86_64", frankenphpAmd64},
@@ -39,7 +39,7 @@ var frankenphpBuilds = []struct{ arch, asset, sha256 string }{
 }
 
 // renovate: datasource=docker depName=composer
-const composerVersion = "2.10.3"
+const composerVersion = "2.11.0"
 
 // frankenphp php-cli has no -d flag, and Composer passes -d settings to the scripts it runs.
 const phpWrapper = `#!/bin/sh
