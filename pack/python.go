@@ -24,7 +24,7 @@ const pythonDir = "/python"
 const uvVersion = "0.13.5"
 
 // renovate: datasource=pypi depName=poetry
-const poetryVersion = "2.5.1"
+const poetryVersion = "2.5.2"
 
 // Parts of uv's Python a server never uses. The bin/python3.x executable embeds the
 // interpreter, so libpython is only for programs that embed Python themselves.
