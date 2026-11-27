@@ -19,9 +19,11 @@ docker run -p 8080:8080 my-app
 
 ## Install
 
-Download the archive for your system from the [releases page](https://github.com/LoriKarikari/terril/releases), unpack it, and put `terril` on your `PATH`. `checksums.txt` lists each archive's SHA-256. terril runs on Linux and macOS, on amd64 and arm64, and needs Docker 23 or later.
+Prerequisites:
 
-Or install from source with Go 1.27 or later:
+- Go 1.27 or later
+- Docker 23 or later
+- Linux or macOS
 
 ```sh
 go install github.com/LoriKarikari/terril/cmd/terril@latest
