@@ -3,6 +3,7 @@ package pack
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 )
@@ -158,6 +159,55 @@ func (ClearEntrypoint) dockerfile() string { return "ENTRYPOINT []" }
 func (c Cmd) dockerfile() string {
 	j, _ := json.Marshal([]string(c))
 	return "CMD " + string(j)
+}
+
+// ContextExcludes returns the patterns of files in the build context that no step of the plan
+// reads, so a caller can leave them out of what it uploads. A pattern a file copied by name would
+// match stays out of the list, such as rust-toolchain.toml when the build installs it.
+func (p *Plan) ContextExcludes() []string {
+	var whole [][]string
+	var named []string
+	read := func(c Copy) {
+		if c.From != "" {
+			return
+		}
+		for _, src := range c.Src {
+			if src == "." {
+				whole = append(whole, c.Exclude)
+			} else {
+				named = append(named, strings.TrimPrefix(path.Clean(src), "./"))
+			}
+		}
+	}
+	for _, st := range p.Stages {
+		for _, step := range st.Steps {
+			if c, ok := step.(Copy); ok {
+				read(c)
+			}
+		}
+	}
+	for _, c := range p.Runtime.Copies {
+		read(c)
+	}
+	if len(whole) == 0 {
+		return nil
+	}
+	var excludes []string
+	for _, pattern := range whole[0] {
+		inEvery := !slices.ContainsFunc(whole[1:], func(e []string) bool { return !slices.Contains(e, pattern) })
+		if inEvery && !slices.ContainsFunc(named, func(n string) bool { return covers(pattern, n) }) && !slices.Contains(excludes, pattern) {
+			excludes = append(excludes, pattern)
+		}
+	}
+	return excludes
+}
+
+func covers(pattern, name string) bool {
+	rest, anywhere := strings.CutPrefix(pattern, "**/")
+	if !anywhere {
+		return name == pattern || strings.HasPrefix(name, pattern+"/")
+	}
+	return name == rest || strings.HasPrefix(name, rest+"/") || strings.HasSuffix(name, "/"+rest) || strings.Contains(name, "/"+rest+"/")
 }
 
 func copySource() Copy { return Copy{Src: []string{"."}, Dst: "./", Exclude: sourceExcludes} }

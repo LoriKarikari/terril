@@ -21,6 +21,8 @@ import (
 	"testing"
 	"text/tabwriter"
 	"time"
+
+	"github.com/LoriKarikari/terril/pack"
 )
 
 var (
@@ -95,6 +97,7 @@ type fixture struct {
 	today       string
 	path        string
 	absent      []string
+	excludes    []string
 	buildEnv    []string
 	secrets     []string
 	runEnv      []string
@@ -127,6 +130,7 @@ func fixtures(t *testing.T) []fixture {
 			f.path = p
 		}
 		f.absent = readLines(root, "absent")
+		f.excludes = readLines(root, "context-excludes")
 		f.runEnv = readLines(root, "run-env")
 		for _, line := range readLines(root, "build-env") {
 			kv, secret := strings.CutPrefix(line, "secret ")
@@ -227,6 +231,21 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 			r.detail = "failed as expected"
 		}
 		return
+	}
+
+	if f.excludes != nil {
+		facts, err := pack.Read(f.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := pack.New(facts, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := plan.ContextExcludes(); !slices.Equal(got, f.excludes) {
+			r.fail(t, "context excludes are %q, want %q", got, f.excludes)
+			return
+		}
 	}
 
 	plantHostArtifacts(t, f.dir)
