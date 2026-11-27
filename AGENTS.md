@@ -23,7 +23,7 @@ terril is an open-source CLI that builds a container image from a Node, Python, 
 
 The maintainer pushes straight to `main` after `just commits`, `just lint`, `just test` and `just cache` pass on the commits rebased onto `origin/main`. No workflow runs them on GitHub. A release is a `v*` tag the maintainer pushes. GoReleaser then builds the archives and writes the release notes from the `feat`, `fix` and `perf` commits since the last tag.
 
-Everyone else, agents included, opens a pull request by following `AI_CONTRIBUTING.md`.
+The repository takes no pull requests. Everyone else, agents included, opens an issue by following `AI_CONTRIBUTING.md`.
 
 ## Rules
 

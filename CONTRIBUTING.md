@@ -1,43 +1,29 @@
 # Contributing to terril
 
-Thanks for wanting to help. This page says which changes terril accepts and how to prove them, so nobody spends a weekend on a pull request that gets closed.
+Thanks for wanting to help. terril takes no pull requests. The maintainer writes every change, so the way to help is a good issue. This page says which issues lead somewhere and what to put in them.
 
 ## What's welcome, and what isn't
 
-### Send a pull request
+### Open an issue
 
-- **Bug fixes.** terril builds an image that's wrong, too big, or doesn't start, and you have a fix.
-- **Package managers and frameworks.** Support for one that a language already almost handles, such as a new lockfile or a framework's start command, with a test app that proves it.
+- **Bug reports.** terril builds an image that's wrong, too big, or doesn't start. Include a small app that shows it.
+- **Package managers and frameworks.** Support for one that a language already almost handles, such as a new lockfile or a framework's start command.
 - **Docs fixes.** Something is unclear, outdated or wrong.
-- **Small improvements.** A clearer error, a smaller image, a faster build, or a cleanup that touches a few files.
-
-### Open an issue first
-
-- **New languages.** Each one means a new provider and long-term upkeep. Describe the apps you want to build first.
-- **Changes to the contract.** Anything that changes CLI flags, `terril.toml` keys, or how terril detects an app affects every user.
-- **Anything large.** If it touches many files, check that it fits before you build it.
+- **Small improvements.** A clearer error, a smaller image or a faster build.
+- **New languages and contract changes.** A new language means a new provider and long-term upkeep. A change to CLI flags, `terril.toml` keys, or how terril detects an app affects every user. Describe the apps you want to build and why.
 
 ### Usually declined
 
 - **A custom plan format or BuildKit frontend.** The plan is a Dockerfile on purpose, so anyone can read it and build it without terril.
 - **Guessing.** Detection that picks a language or start command when two are equally likely. terril fails and asks instead.
 
-## Pull requests
+## How the maintainer ships
 
-1. Read `AGENTS.md`. It lists the rules every change follows, such as running images as a non-root user and parsing manifests only in `pack/facts.go`.
-2. Fork the repo and branch from `main`.
-3. Keep the change focused on one thing. Unrelated cleanups go in their own pull request.
-4. Prove it end to end with a test app. See the testing section below.
-5. Update `README.md` if behavior changes.
-6. Run `just lint`, `just test` and `just cache`. Install [just](https://github.com/casey/just) first if you don't have it. All three must pass.
-7. Write commit messages and the pull request title as [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
-8. Describe what the change does, what it doesn't do, and how you checked it.
-
-No checks run on GitHub. The maintainer runs `just lint`, `just test` and `just cache` on your branch before merging it. `main` only accepts squash merges, and the pull request title becomes the commit on `main`.
+The maintainer pushes straight to `main` after `just commits`, `just lint`, `just test` and `just cache` pass. No checks run on GitHub. Every change comes with a test app in `e2e/testdata/` that fails without it.
 
 ### Commit messages
 
-Use `<type>(<scope>): <summary>`, in lowercase and the imperative mood, with no period at the end.
+Commits on `main` use `<type>(<scope>): <summary>`, in lowercase and the imperative mood, with no period at the end.
 
 - **Types.** `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `ci`, and `chore`.
 - **CI changes.** Use `ci`, even for a fix. `feat`, `fix` and `perf` are for changes users of terril notice, and they go into the release notes.
@@ -55,7 +41,7 @@ feat(config)!: rename packages to apt-packages
 
 ## Testing
 
-terril has one kind of test. `e2e/e2e_test.go` builds every app in `e2e/testdata/` with the terril CLI, starts it, and checks its HTTP response. You need Docker and [dive](https://github.com/wagoodman/dive).
+You don't need to run the tests to open an issue, but a failing test app is the best reproduction you can give. terril has one kind of test. `e2e/e2e_test.go` builds every app in `e2e/testdata/` with the terril CLI, starts it, and checks its HTTP response. You need Docker and [dive](https://github.com/wagoodman/dive).
 
 Run every app, or only some:
 
@@ -95,12 +81,11 @@ The maintainer releases by pushing a `v*` tag on `main`. Before 1.0, a release w
 
 ## Using AI tools
 
-AI-assisted pull requests and issues are fine. They meet the same bar as any other change:
+AI-assisted issues are fine. They meet the same bar as any other issue:
 
 - **Show it's real.** Include the actual `terril` output, build log, or container error that proves the problem exists.
-- **Say what's in scope.** Name what the change does and what it leaves alone.
-- **Include how to check it.** The exact commands you ran, not a description of them.
-- **Review it yourself first.** You're responsible for every line you submit.
+- **Include how to reproduce it.** The exact commands you ran, not a description of them.
+- **Review it yourself first.** You're responsible for every word you submit.
 
 Agents should follow `AI_CONTRIBUTING.md`, which walks through each step.
 
@@ -114,4 +99,4 @@ Don't open a public issue for a security problem. Report it privately through Gi
 
 ## License
 
-terril uses the Apache-2.0 license. By submitting a pull request, you agree that your contribution is licensed the same way.
+terril uses the Apache-2.0 license.
