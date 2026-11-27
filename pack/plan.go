@@ -204,10 +204,17 @@ func (p *Plan) ContextExcludes() []string {
 
 func covers(pattern, name string) bool {
 	rest, anywhere := strings.CutPrefix(pattern, "**/")
-	if !anywhere {
-		return name == pattern || strings.HasPrefix(name, pattern+"/")
+	segs := strings.Split(name, "/")
+	n := strings.Count(rest, "/") + 1
+	for i := range segs {
+		if ok, _ := path.Match(rest, strings.Join(segs[i:min(i+n, len(segs))], "/")); ok {
+			return true
+		}
+		if !anywhere {
+			return false
+		}
 	}
-	return name == rest || strings.HasPrefix(name, rest+"/") || strings.HasSuffix(name, "/"+rest) || strings.Contains(name, "/"+rest+"/")
+	return false
 }
 
 func copySource() Copy { return Copy{Src: []string{"."}, Dst: "./", Exclude: sourceExcludes} }
@@ -215,7 +222,7 @@ func copySource() Copy { return Copy{Src: []string{"."}, Dst: "./", Exclude: sou
 func copyAssets(stages []string) []Step {
 	var steps []Step
 	for _, s := range stages {
-		steps = append(steps, Copy{From: s, Src: []string{"/app/"}, Dst: "./", Exclude: []string{"node_modules"}})
+		steps = append(steps, Copy{From: s, Src: []string{assetsDir + "/"}, Dst: "./"})
 	}
 	return steps
 }

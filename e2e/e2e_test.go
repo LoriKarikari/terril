@@ -98,6 +98,7 @@ type fixture struct {
 	today       string
 	path        string
 	absent      []string
+	absentFiles []string
 	excludes    []string
 	buildEnv    []string
 	secrets     []string
@@ -131,6 +132,7 @@ func fixtures(t *testing.T) []fixture {
 			f.path = p
 		}
 		f.absent = readLines(t, root, "absent")
+		f.absentFiles = readLines(t, root, "absent-files")
 		f.excludes = readLines(t, root, "context-excludes")
 		f.runEnv = readLines(t, root, "run-env")
 		for _, line := range readLines(t, root, "build-env") {
@@ -317,6 +319,12 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	if slices.ContainsFunc(rootfs.files, func(p string) bool { return strings.HasSuffix(p, "HOST_MARKER") }) {
 		r.fail(t, "host node_modules or __pycache__ copied into the image")
 		return
+	}
+	for _, name := range f.absentFiles {
+		if slices.ContainsFunc(rootfs.files, func(p string) bool { return strings.TrimSuffix(p, "/") == name }) {
+			r.fail(t, "the image has %s, which absent-files lists", name)
+			return
+		}
 	}
 	if shipped := shippedPackages(rootfs.files, f.absent); len(shipped) > 0 {
 		r.fail(t, "image ships packages it shouldn't: %s", strings.Join(shipped, " "))

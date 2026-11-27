@@ -1,6 +1,9 @@
 package pack
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 var staticProvider = provider{
 	name:     "static",
@@ -12,10 +15,17 @@ var staticProvider = provider{
 		return 0
 	},
 	plan: func(f *Facts, _ []string) ([]Stage, Runtime, error) {
-		rt, err := staticRuntime(f, Copy{Src: []string{"."}, Dst: "/srv/", Exclude: sourceExcludes}, false)
+		rt, err := staticRuntime(f, Copy{Src: []string{"."}, Dst: "/srv/", Exclude: siteExcludes}, false)
+		if f.Has(".well-known") {
+			rt.Copies = append(rt.Copies, Copy{Src: []string{".well-known"}, Dst: "/srv/.well-known/"})
+		}
 		return nil, rt, err
 	},
 }
+
+// Caddy serves every file in /srv, so dotfiles such as .env and the files terril reads stay out.
+// .well-known is a dotfile folder that sites publish on purpose.
+var siteExcludes = append(slices.Clone(sourceExcludes), "**/.*", "terril.toml", "Procfile")
 
 // pin: datasource=docker depName=caddy
 const caddyVersion = "2.11-alpine"

@@ -27,9 +27,26 @@ var nodeProvider = provider{
 		}
 		return nodeVersion(f)
 	}},
-	assetStage: func(f *Facts, name string) (Stage, error) {
-		return nodeBuild(f, name, nil, false)
-	},
+	assetStage: nodeAssetStage,
+}
+
+const assetsDir = "/assets"
+
+// The build writes its output among the sources and the install's files, such as Yarn's
+// .pnp.cjs, so only the files it wrote after the stamp go to the app.
+func nodeAssetStage(f *Facts, name string) (Stage, error) {
+	s, err := nodeBuild(f, name, nil, false)
+	if err != nil {
+		return s, err
+	}
+	build, ok := s.Steps[len(s.Steps)-1].(Run)
+	if !ok {
+		return s, fmt.Errorf("%s/package.json has no build script", f.Dir)
+	}
+	build.Cmd = "touch /tmp/before-build && " + build.Cmd + " && mkdir " + assetsDir +
+		" && find . -path ./node_modules -prune -o -type f -newer /tmp/before-build -print0 | xargs -0r cp --parents -t " + assetsDir
+	s.Steps[len(s.Steps)-1] = build
+	return s, nil
 }
 
 type nodeManager struct {
@@ -93,9 +110,9 @@ var nodeManagers = map[string]nodeManager{
 			return append(corepackYarn(n), Env{"YARN_ENABLE_GLOBAL_CACHE", "false"})
 		},
 		install: "yarn install", frozen: "yarn install --immutable",
-		prune: "yarn workspaces focus --all --production",
+		// focus leaves dev dependency zips in the cache, so it refills an empty one.
+		prune: "rm -rf .yarn/cache && yarn workspaces focus --all --production",
 		run:   "yarn run", start: "npm start", runFile: "node", exec: "yarn",
-		// focus leaves unused zips in the cache, so it refills an empty one.
 		workspacePrune: func(_, pkg string) string {
 			return "rm -rf .yarn/cache && yarn workspaces focus --production " + shellQuote(pkg)
 		},
