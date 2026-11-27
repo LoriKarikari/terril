@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -21,9 +24,12 @@ const usage = `terril turns an app directory into a container image.
       build the image with docker
   terril version
       print the version
+  terril help
+      print this help
 
---env makes a variable available to the build steps, but not to the
-running app. Without =VALUE it takes the value from the environment.
+Flags go before DIR. --env makes a variable available to the build steps,
+but not to the running app. Without =VALUE it takes the value from the
+environment. -t defaults to the directory name.
 `
 
 // Release builds set version with -ldflags.
@@ -40,31 +46,67 @@ func versionString() string {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
-	}
-	cmd := os.Args[1]
-	if cmd == "version" || cmd == "--version" || cmd == "-v" {
-		fmt.Println("terril", versionString())
-		return
-	}
-	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	provider := fs.String("provider", "", "force the primary provider: node, python, ruby, php, dotnet, rust, go or static")
-	tag := fs.String("t", "", "image tag (build only; default: directory name)")
-	var env envFlags
-	fs.Var(&env, "env", "build-time variable, KEY=VALUE or KEY (repeatable)")
-	_ = fs.Parse(os.Args[2:])
-	if fs.NArg() != 1 || (cmd != "plan" && cmd != "build") {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
-	}
-	dir := fs.Arg(0)
+	os.Exit(cli(os.Args[1:]))
+}
 
-	if err := run(cmd, dir, *provider, *tag, &env); err != nil {
-		fmt.Fprintln(os.Stderr, "terril:", err)
-		os.Exit(1)
+func cli(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, usage)
+		return 2
 	}
+	cmd := args[0]
+	switch cmd {
+	case "help", "-h", "--help":
+		fmt.Print(usage)
+		return 0
+	case "version", "--version":
+		if len(args) > 1 {
+			return usageError("version takes no arguments")
+		}
+		fmt.Println("terril", versionString())
+		return 0
+	case "plan", "build":
+	default:
+		return usageError(fmt.Sprintf("unknown command %q", cmd))
+	}
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	provider := fs.String("provider", "", "")
+	tag := fs.String("t", "", "")
+	var env envFlags
+	fs.Var(&env, "env", "")
+	if err := fs.Parse(args[1:]); errors.Is(err, flag.ErrHelp) {
+		fmt.Print(usage)
+		return 0
+	} else if err != nil {
+		return usageError(err.Error())
+	}
+	switch {
+	case fs.NArg() == 0:
+		return usageError("missing DIR")
+	case fs.NArg() > 1 && strings.HasPrefix(fs.Arg(1), "-"):
+		return usageError("flags go before DIR")
+	case fs.NArg() > 1:
+		return usageError("one DIR at a time")
+	case cmd == "plan" && *tag != "":
+		return usageError("-t only applies to build")
+	}
+
+	err := run(cmd, fs.Arg(0), *provider, *tag, &env)
+	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() > 0 {
+		fmt.Fprintln(os.Stderr, "terril: docker build failed")
+		return exit.ExitCode()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "terril:", err)
+		return 1
+	}
+	return 0
+}
+
+func usageError(msg string) int {
+	fmt.Fprintf(os.Stderr, "terril: %s\n\n%s", msg, usage)
+	return 2
 }
 
 func run(cmd, dir, provider, tag string, env *envFlags) error {
@@ -96,15 +138,20 @@ func run(cmd, dir, provider, tag string, env *envFlags) error {
 		return err
 	}
 	if tag == "" {
-		abs, _ := filepath.Abs(dir)
-		tag = strings.ToLower(filepath.Base(abs))
+		if tag, err = defaultTag(dir); err != nil {
+			return err
+		}
 	}
 	fmt.Fprintf(os.Stderr, "terril: building %s as %s\n", plan.Summary(), tag)
 	args := []string{"build", "-t", tag, "-f", "-"}
 	dockerEnv := os.Environ()
 	if len(env.names) > 0 {
+		digest, err := env.digest()
+		if err != nil {
+			return err
+		}
 		// Provenance attestations record build args, and the digest is derived from secret values.
-		args = append(args, "--provenance=false", "--build-arg", pack.BuildEnvArg+"="+env.digest())
+		args = append(args, "--provenance=false", "--build-arg", pack.BuildEnvArg+"="+digest)
 		for _, n := range env.names {
 			args = append(args, "--secret", "id="+n+",env="+n)
 			dockerEnv = append(dockerEnv, n+"="+env.values[n])
@@ -115,4 +162,27 @@ func run(cmd, dir, provider, tag string, env *envFlags) error {
 	docker.Stdin = strings.NewReader(dockerfile)
 	docker.Stdout, docker.Stderr = os.Stdout, os.Stderr
 	return docker.Run()
+}
+
+var (
+	// Docker's rule for a repository name.
+	dockerNameRe = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$`)
+	nonAlnumRe   = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
+// defaultTag names the image after the directory, turning what docker rejects into dashes, so
+// "My App" becomes my-app.
+func defaultTag(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	name := strings.ToLower(filepath.Base(abs))
+	if !dockerNameRe.MatchString(name) {
+		name = strings.Trim(nonAlnumRe.ReplaceAllString(name, "-"), "-")
+	}
+	if name == "" {
+		return "", fmt.Errorf("can't make an image name from %q; pass -t", filepath.Base(abs))
+	}
+	return name, nil
 }

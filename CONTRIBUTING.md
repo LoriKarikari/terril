@@ -67,6 +67,7 @@ A test app can also have these files:
 - `app` names a subfolder to build, for monorepos.
 - `absent` lists package names that must not be in the image.
 - `git-root` names a folder of the app that the test makes the root of a git repository, since git can't commit a `.git` folder.
+- `args` holds the arguments for terril instead of `build -t <image> DIR`, with `DIR` for the copied app. The test checks only terril's output against `expect` or `expect-error`, so use it for the CLI itself.
 - `unreadable` lists files that the test makes unreadable before the build.
 - `absent-files` lists paths that must not be in the image, such as `srv/.env`.
 - `run-env` holds `KEY=VALUE` lines that the test passes to `docker run -e`, for values a platform sets at runtime, such as secrets.

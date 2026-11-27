@@ -3,7 +3,10 @@ package e2e
 import (
 	"archive/tar"
 	"bytes"
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,6 +42,8 @@ var results = struct {
 	images      int
 	pull, disk  int64
 }{}
+
+var runStart = time.Now()
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -100,6 +105,7 @@ type fixture struct {
 	absent      []string
 	absentFiles []string
 	gitRoot     string
+	args        []string
 	unreadable  []string
 	excludes    []string
 	buildEnv    []string
@@ -136,6 +142,9 @@ func fixtures(t *testing.T) []fixture {
 		f.absent = readLines(t, root, "absent")
 		f.absentFiles = readLines(t, root, "absent-files")
 		f.gitRoot, _ = readFile(t, root, "git-root")
+		if s, ok := readFile(t, root, "args"); ok {
+			f.args = strings.Fields(s)
+		}
 		f.unreadable = readLines(t, root, "unreadable")
 		f.excludes = readLines(t, root, "context-excludes")
 		f.runEnv = readLines(t, root, "run-env")
@@ -242,6 +251,26 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	keepUntilEnd(image)
 
 	dir := copyApp(t, f)
+	if f.args != nil {
+		args := slices.Clone(f.args)
+		for i, a := range args {
+			if a == "DIR" {
+				args[i] = dir
+			}
+		}
+		out, err := f.run(log, args...)
+		switch want := cmp.Or(f.expectError, f.expect); {
+		case f.expectError == "" && err != nil:
+			r.fail(t, "terril %s failed, see %s", strings.Join(f.args, " "), log.Name())
+		case f.expectError != "" && err == nil:
+			r.fail(t, "terril %s succeeded but should have failed", strings.Join(f.args, " "))
+		case !strings.Contains(out, want):
+			r.fail(t, "wrong output, see %s", log.Name())
+		default:
+			r.detail = "printed as expected"
+		}
+		return
+	}
 	if f.expectError != "" {
 		out, err := f.run(log, "build", "-t", image, dir)
 		switch {
@@ -586,6 +615,32 @@ func leakedValues(t *testing.T, image string, f fixture, secretsFound []string) 
 	for _, s := range secretsFound {
 		leaked = append(leaked, fmt.Sprintf("%q", s))
 	}
+	if len(f.buildEnv) == 0 {
+		return leaked
+	}
+	// BuildKit's history keeps every build arg. An unkeyed hash of the values there lets anyone
+	// confirm a guessed secret offline. Builds of earlier runs may have used another terril.
+	refs, err := output(exec.Command("docker", "buildx", "history", "ls", "--format", "{{.Ref}}",
+		"--filter", "startedAt>"+runStart.UTC().Format(time.RFC3339)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range strings.Fields(string(refs)) {
+		record, err := output(exec.Command("docker", "buildx", "history", "inspect", ref))
+		if err != nil {
+			t.Fatal(err)
+		}
+		meta += string(record)
+	}
+	names := slices.Clone(f.buildEnv)
+	slices.Sort(names)
+	h := sha256.New()
+	for _, kv := range names {
+		h.Write([]byte(kv + "\x00"))
+	}
+	if sum := hex.EncodeToString(h.Sum(nil)); strings.Contains(meta, sum) {
+		leaked = append(leaked, "the unkeyed sha256 of the values")
+	}
 	return leaked
 }
 
@@ -644,7 +699,7 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 
 func TestCache(t *testing.T) {
 	for _, f := range fixtures(t) {
-		if f.expectError != "" || len(f.buildEnv) > 0 {
+		if f.expectError != "" || f.args != nil || len(f.buildEnv) > 0 {
 			continue
 		}
 		t.Run(f.name, func(t *testing.T) {

@@ -47,6 +47,8 @@ Build the image with your own tag:
 terril build -t api:dev ./my-app
 ```
 
+A folder name that docker can't use as a tag, such as `My App`, becomes `my-app`. Flags go before the folder. When `docker build` fails, terril exits with docker's exit code. `terril help` prints the usage.
+
 ## Supported apps
 
 | Language | Package managers | Frameworks |

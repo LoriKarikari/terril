@@ -1,10 +1,15 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -50,11 +55,37 @@ func (e *envFlags) check() error {
 	return nil
 }
 
-func (e *envFlags) digest() string {
-	names := slices.Sorted(slices.Values(e.names))
-	h := sha256.New()
-	for _, n := range names {
+// The digest sits on docker's command line and in the image history, so it's keyed with a
+// secret from this machine. Without the key, a short secret can't be confirmed by hashing guesses.
+func (e *envFlags) digest() (string, error) {
+	key, err := digestKey()
+	if err != nil {
+		return "", err
+	}
+	h := hmac.New(sha256.New, key)
+	for _, n := range slices.Sorted(slices.Values(e.names)) {
 		h.Write([]byte(n + "=" + e.values[n] + "\x00"))
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func digestKey() ([]byte, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("--env needs a cache directory for its key: %w", err)
+	}
+	p := filepath.Join(dir, "terril", "build-env.key")
+	if key, err := os.ReadFile(p); err == nil && len(key) == 32 {
+		return key, nil
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return nil, err
+	}
+	return key, os.WriteFile(p, key, 0o600)
 }
