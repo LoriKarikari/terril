@@ -90,7 +90,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Copy{Src: []string{"."}, Dst: "./", Exclude: append(slices.Clone(sourceExcludes), "**/bin", "**/obj")},
 	}
 	steps = append(steps, copyAssets(assets)...)
-	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote(d.Project) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
+	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote(d.Project) + " -f " + shellQuote(d.TargetFramework) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
 
 	hook := Stage{Name: "port-hook", From: sdk, Workdir: "/hook", Steps: []Step{
 		Env{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"},

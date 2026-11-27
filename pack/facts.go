@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/Masterminds/semver/v3"
 	"github.com/bmatcuk/doublestar/v4"
 	"golang.org/x/mod/modfile"
 	"gopkg.in/yaml.v3"
@@ -233,11 +234,21 @@ func readNode(f *Facts) (*Node, error) {
 	if err := json.Unmarshal([]byte(s), &n.Package); err != nil {
 		return nil, fmt.Errorf("package.json: %w", err)
 	}
+	// bun.lock and bun.lockb are one manager's, so only lockfiles of different managers clash.
+	var lockfiles []string
+	managers := map[string]bool{}
 	for _, l := range nodeLockfiles {
-		if f.rootHas(l.file) {
-			n.Manager, n.Lockfile = l.manager, l.file
-			break
+		if !f.rootHas(l.file) || managers[l.manager] {
+			continue
 		}
+		if n.Lockfile == "" {
+			n.Manager, n.Lockfile = l.manager, l.file
+		}
+		managers[l.manager] = true
+		lockfiles = append(lockfiles, l.file)
+	}
+	if len(lockfiles) > 1 {
+		f.cantBuild("node", fmt.Errorf("several lockfiles (%s), so terril can't tell which package manager the app uses; delete the ones it doesn't use", strings.Join(lockfiles, ", ")))
 	}
 	pm := n.Package.PackageManager
 	if pm == "" && f.Workspace != nil {
@@ -252,11 +263,11 @@ func readNode(f *Facts) (*Node, error) {
 	// packageManager looks like "pnpm@10.4.1+sha512.abc".
 	if pm != "" {
 		name, version, _ := strings.Cut(strings.SplitN(pm, "+", 2)[0], "@")
-		if n.Manager == "" {
-			n.Manager = name
-		}
-		if name == n.Manager {
-			n.ManagerVersion = version
+		switch {
+		case n.Manager == "" || name == n.Manager:
+			n.Manager, n.ManagerVersion = name, version
+		default:
+			f.cantBuild("node", fmt.Errorf("packageManager is %s, but the lockfile is %s; keep the lockfile of the manager the app uses", pm, n.Lockfile))
 		}
 	}
 	if n.Manager == "" {
@@ -938,8 +949,7 @@ func readDotNet(f *Facts) (*DotNet, error) {
 		if g.TargetFramework != "" {
 			d.TargetFramework = g.TargetFramework
 		} else if g.TargetFrameworks != "" && d.TargetFramework == "" {
-			frameworks := strings.Split(g.TargetFrameworks, ";")
-			d.TargetFramework = strings.TrimSpace(frameworks[len(frameworks)-1])
+			d.TargetFramework = newestFramework(strings.Split(g.TargetFrameworks, ";"))
 		}
 	}
 	if s, ok := f.read("global.json"); ok {
@@ -954,6 +964,24 @@ func readDotNet(f *Facts) (*DotNet, error) {
 		d.SDKVersion = g.SDK.Version
 	}
 	return d, nil
+}
+
+// A project that targets several frameworks ships the newest one, since nothing in it says which
+// one is for production.
+func newestFramework(frameworks []string) string {
+	var newest string
+	var newestVersion *semver.Version
+	for _, fw := range frameworks {
+		fw = strings.TrimSpace(fw)
+		v, err := semver.NewVersion(strings.TrimPrefix(fw, "net"))
+		if err != nil || !strings.HasPrefix(fw, "net") {
+			continue
+		}
+		if newestVersion == nil || v.GreaterThan(newestVersion) {
+			newest, newestVersion = fw, v
+		}
+	}
+	return newest
 }
 
 type Rust struct {
@@ -1075,10 +1103,14 @@ func readRust(f *Facts) (*Rust, error) {
 }
 
 func rustToolchain(f *Facts) string {
-	for _, name := range []string{"rust-toolchain.toml", "rust-toolchain"} {
-		if f.Has(name) {
-			return name
-		}
+	switch {
+	case f.Has("rust-toolchain.toml") && f.Has("rust-toolchain"):
+		f.cantBuild("rust", fmt.Errorf("rust-toolchain and rust-toolchain.toml are both here; keep one"))
+		return ""
+	case f.Has("rust-toolchain.toml"):
+		return "rust-toolchain.toml"
+	case f.Has("rust-toolchain"):
+		return "rust-toolchain"
 	}
 	return ""
 }

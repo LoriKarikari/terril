@@ -62,13 +62,15 @@ terril build -t api:dev ./my-app
 
 A `web:` line in a `Procfile` replaces the start command.
 
+When terril finds two answers and nothing says which is right, it fails and names both. That covers lockfiles of two Node package managers, a `packageManager` field that disagrees with the lockfile, both `rust-toolchain` and `rust-toolchain.toml`, and a Python app that defines a Flask and a FastAPI app. Set `start` in `terril.toml` to pick the Python one. A Python app with both `main.py` and `app.py` runs `main.py`, and a Node app with both Next.js and Nuxt builds Next.js. `start` overrides both.
+
 A folder with only an `index.html`, or a Vite app with no `start` script, is served as a static site by Caddy. Vite apps get single-page-app routing, so `/dashboard` serves `index.html`.
 
 If a Python, Ruby, PHP or Go app has a `package.json` with a `build` script, Node runs that script first. The final image doesn't include Node. For Django apps that set `STATIC_ROOT`, terril then runs `collectstatic`. Rails apps get `assets:precompile`. Rails needs `SECRET_KEY_BASE` or `RAILS_MASTER_KEY` when the container starts, and terril never puts either in the image.
 
 PHP apps run on [FrankenPHP](https://frankenphp.dev)'s static build, which has PHP 8.5 and 80 extensions, such as intl, gd, pdo_pgsql and redis. The same binary runs Composer, so an app that needs another extension fails at `composer install` and names it. Laravel apps need `APP_KEY` when the container starts, and log to stderr.
 
-For .NET, terril publishes the project at the app root, or the only web project in the folder, such as an API next to its test projects. .NET apps run on Microsoft's chiseled images, with ICU for culture formatting unless the project sets `InvariantGlobalization`. A `global.json` that pins an SDK version picks that exact SDK.
+For .NET, terril publishes the project at the app root, or the only web project in the folder, such as an API next to its test projects. .NET apps run on Microsoft's chiseled images, with ICU for culture formatting unless the project sets `InvariantGlobalization`. A `global.json` that pins an SDK version picks that exact SDK. A project that lists several `TargetFrameworks` ships the newest.
 
 For Rust, terril builds the only binary in the crate or workspace, or the one `default-run` names. Dependencies compile in their own cached step with [cargo-chef](https://github.com/LukeMathWalker/cargo-chef), so editing your code doesn't recompile them. rustup installs the Rust that `rust-toolchain.toml` or `rust-toolchain` names, including nightlies, with the targets and components it lists.
 

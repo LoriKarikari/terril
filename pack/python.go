@@ -1,6 +1,9 @@
 package pack
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 var pythonProvider = provider{
 	name:     "python",
@@ -179,6 +182,8 @@ var pythonFrameworks = []struct {
 }
 
 func pythonStart(py *Python) (Cmd, error) {
+	var apps []string
+	var start Cmd
 	for _, fw := range pythonFrameworks {
 		if !py.Deps[fw.dep] {
 			continue
@@ -190,7 +195,14 @@ func pythonStart(py *Python) (Cmd, error) {
 		if !py.Deps[fw.server] {
 			return nil, fmt.Errorf("this is a %s app but %s isn't in its dependencies; add %s", fw.name, fw.server, fw.server)
 		}
-		return fw.cmd(module), nil
+		apps = append(apps, fw.name+" ("+module+")")
+		start = fw.cmd(module)
+	}
+	if len(apps) > 1 {
+		return nil, fmt.Errorf("this app defines %s; set start in terril.toml to the one to run", strings.Join(apps, " and "))
+	}
+	if start != nil {
+		return start, nil
 	}
 	if len(py.Entries) > 0 {
 		return Cmd{"python", py.Entries[0]}, nil

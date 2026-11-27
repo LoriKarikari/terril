@@ -1,0 +1,10 @@
+{
+  "name": "node-http",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "yarn@4.1.0"
+}

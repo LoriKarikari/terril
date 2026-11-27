@@ -1,0 +1,1 @@
+this app defines FastAPI (main:app) and Flask (app:server); set start in terril.toml to the one to run
