@@ -21,10 +21,9 @@ var phpProvider = provider{
 // needs no OS. The same binary runs Composer, so installs see the extensions the app gets.
 //
 // FrankenPHP rebuilds the binaries of its latest release every night under the same names, so
-// pin a release that already has a newer one; its binaries no longer change. Renovate waits a
-// week before proposing a release for that reason.
+// pin a release that already has a newer one; its binaries no longer change.
 //
-// pin: datasource=github-releases depName=php/frankenphp
+// pin: datasource=github-releases depName=php/frankenphp release=superseded
 const frankenphpVersion = "v1.13.3"
 
 // pin: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.3

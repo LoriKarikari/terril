@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Prints one row per pinned version: file, name, pinned, latest, and "outdated" when they differ.
+# It exits non-zero, naming the pin, when it can't read a pin or look up its latest version.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+fail() {
+    echo "$1" >&2
+    exit 1
+}
 
 shape() { sed -E 's/[0-9]+/[0-9]+/g; s/\./\\./g' <<<"$1"; }
 
@@ -34,51 +40,72 @@ docker_tags() {
     done
 }
 
+# FrankenPHP rebuilds the binaries of its newest release every night, so release=superseded
+# proposes the newest release that already has a newer one.
+releases() {
+    local name=$1 which=$2
+    local tags
+    tags=$(gh api "repos/$name/releases?per_page=20" --jq '.[] | select(.prerelease or .draft | not) | .tag_name')
+    case $which in
+    latest) head -1 <<<"$tags" ;;
+    superseded) sed -n 2p <<<"$tags" ;;
+    *) fail "unknown release=$which" ;;
+    esac
+}
+
 latest() {
-    local source=$1 name=$2 current=$3
+    local source=$1 name=$2 current=$3 which=$4
     case $source in
     go) curl -fsS "https://proxy.golang.org/$name/@latest" | jq -r .Version ;;
     docker) docker_tags "$name" | newest "$current" ;;
     pypi) curl -fsS "https://pypi.org/pypi/$name/json" | jq -r .info.version ;;
     npm) curl -fsS "https://registry.npmjs.org/$name/latest" | jq -r .version ;;
-    github-releases) gh api "repos/$name/releases/latest" --jq .tag_name ;;
-    *) echo "unknown source $source" >&2; return 1 ;;
+    github-releases) releases "$name" "$which" ;;
+    *) fail "unknown datasource=$source" ;;
     esac
 }
 
 row() {
+    [[ -n $4 ]] || fail "$1: can't look up the latest version of $2"
     local status=""
     [[ $3 == "$4" ]] || status=outdated
     printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$status"
 }
 
+hits=$(grep -rn -E '^(//|#) pin: ' pack justfile | cut -d: -f1,2)
 while IFS= read -r hit; do
     file=${hit%%:*}
     line=${hit#*:}
-    line=${line%%:*}
     marker=$(sed -n "${line}p" "$file")
     next=$(sed -n "$((line + 1))p" "$file")
-    source=$(grep -oP 'datasource=\K\S+' <<<"$marker")
-    name=$(grep -oP 'depName=\K\S+' <<<"$marker")
+    source=$(grep -oP 'datasource=\K\S+' <<<"$marker") || fail "$file:$line: the pin has no datasource="
+    name=$(grep -oP 'depName=\K\S+' <<<"$marker") || fail "$file:$line: the pin has no depName="
+    which=$(grep -oP 'release=\K\S+' <<<"$marker" || echo latest)
     if [[ $source == github-release-attachments ]]; then
-        release=$(grep -oP 'digestVersion=\K\S+' <<<"$marker")
-        version=$(grep -h -A1 "pin: datasource=github-releases depName=$name\$" pack/*.go | grep -oP '"\K[^"]+(?=")')
-        row "$file" "$name checksum" "$release" "$version"
+        release=$(grep -oP 'digestVersion=\K\S+' <<<"$marker") || fail "$file:$line: the pin has no digestVersion="
+        version=$(grep -h -A1 -E "pin: datasource=github-releases depName=$name( |\$)" pack/*.go | grep -oP 'const \w+ = "\K[^"]+') ||
+            fail "$file:$line: no github-releases pin for $name"
+        row "$file:$line" "$name checksum" "$release" "$version"
         continue
     fi
-    current=$(grep -oP '"\K[^"@]+(?="$)|@\K[^"]+(?="$)' <<<"$next")
-    row "$file" "$name" "$current" "$(latest "$source" "$name" "$current")"
-done < <(grep -rn -E '^(//|#) pin: ' pack justfile | cut -d: -f1,2)
+    current=$(grep -oP 'const \w+ = "\K[^"]+|:= "[^"]*@\K[^"]+' <<<"$next") ||
+        fail "$file:$((line + 1)): can't read the pinned version below the pin comment"
+    found=$(latest "$source" "$name" "$current" "$which") || fail "$file:$line: can't look up the latest version of $name"
+    row "$file:$line" "$name" "$current" "$found"
+done <<<"$hits"
 
-grep -H -oP 'uses: \K\S+@v[0-9]+' .github/workflows/*.yml | while IFS= read -r hit; do
+while IFS= read -r hit; do
+    [[ -n $hit ]] || continue
     file=${hit%%:*}
-    use=${hit##*:}
-    action=${use%@*}
-    major=$(gh api "repos/$action/releases/latest" --jq .tag_name | grep -oP '^v[0-9]+')
-    row "$file" "$action" "${use#*@}" "$major"
-done
+    rest=${hit#*:}
+    line=${rest%%:*}
+    action=$(grep -oP 'uses: \K[^@]+' <<<"$rest")
+    current=$(grep -oP '# \Kv\S+' <<<"$rest") || fail "$file:$line: pin $action by commit SHA with its version in a comment"
+    found=$(gh api "repos/$action/releases/latest" --jq .tag_name) || fail "$file:$line: can't look up the latest version of $action"
+    row "$file:$line" "$action" "$current" "$found"
+done < <(grep -Hn 'uses: ' .github/workflows/*.yml)
 
-go list -m -u -f '{{if and (not .Indirect) (not .Main)}}{{.Path}} {{.Version}} {{with .Update}}{{.Version}}{{end}}{{end}}' all 2>/dev/null |
-    while read -r path version update; do
-        [[ -n $path ]] && row go.mod "$path" "$version" "${update:-$version}"
-    done
+modules=$(go list -m -u -f '{{if and (not .Indirect) (not .Main)}}{{.Path}} {{.Version}} {{with .Update}}{{.Version}}{{end}}{{end}}' all)
+while read -r path version update; do
+    [[ -n $path ]] && row go.mod "$path" "$version" "${update:-$version}"
+done <<<"$modules"

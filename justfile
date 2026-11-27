@@ -9,16 +9,16 @@ default:
 build:
     go build -o bin/terril ./cmd/terril
 
-# Builds, runs and checks every app in e2e/testdata, or only the ones named.
+# Builds, runs and checks every app in e2e/testdata, or only the ones named. Without names it also builds three apps from the ECR Public mirror of the official images.
 [positional-arguments]
 test *apps:
-    cd e2e && go test -count=1 -timeout 60m -parallel 4 -run TestApps -apps "$(IFS=,; echo "$*")" .
+    cd e2e && go test -count=1 -timeout 60m -parallel 4 -run '^(TestApps|TestAppsFromOfficialImagesMirror)$' -apps "$(IFS=,; echo "$*")" .
 
 # Rebuilds every app, or the ones named, after a source edit, and fails if the dependency install reruns.
 # One app at a time: under parallel builds that share steps, BuildKit can miss a cached step.
 [positional-arguments]
 cache *apps:
-    cd e2e && go test -count=1 -timeout 60m -parallel 1 -run TestCache -apps "$(IFS=,; echo "$*")" .
+    cd e2e && go test -count=1 -timeout 60m -parallel 1 -run '^TestCache$' -apps "$(IFS=,; echo "$*")" .
 
 # Lists every pinned version next to the latest one upstream, and marks the outdated ones.
 pins:
@@ -44,6 +44,12 @@ commits range="origin/main..HEAD":
         [[ -n "$sha" ]] || continue
         if ! [[ "$subject" =~ $pattern ]]; then
             echo "not a conventional commit: ${sha:0:7} $subject" >&2
+            bad=1
+        elif [[ "$subject" == fix\(ci\)* ]]; then
+            echo "a CI change is ci:, never fix(ci): ${sha:0:7} $subject" >&2
+            bad=1
+        elif [[ "$subject" =~ ^[a-z]+(\([a-z0-9-]+\))?!: ]] && ! git log -1 --format=%B "$sha" | grep -q '^BREAKING CHANGE: '; then
+            echo "a ! subject needs a BREAKING CHANGE: footer: ${sha:0:7} $subject" >&2
             bad=1
         fi
     done <<<"$log"

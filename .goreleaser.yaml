@@ -7,7 +7,7 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Tag}}
 archives:
   - formats: [tar.gz]
 checksum:
@@ -16,19 +16,11 @@ changelog:
   use: github
   groups:
     - title: Features
-      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      regexp: '^feat(\([a-z0-9-]+\))?!?:.+$'
       order: 0
     - title: Fixes
-      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      regexp: '^fix(\([a-z0-9-]+\))?!?:.+$'
       order: 1
     - title: Performance
-      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      regexp: '^perf(\([a-z0-9-]+\))?!?:.+$'
       order: 2
-    - title: Other
-      order: 999
-  filters:
-    exclude:
-      - '^docs'
-      - '^test'
-      - '^chore'
-      - '^ci'
