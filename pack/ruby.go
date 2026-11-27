@@ -76,11 +76,11 @@ func planRuby(f *Facts, assets []string) ([]Stage, Runtime, error) {
 
 	// The full ruby image has compilers and headers for native gems. Its slim image has the
 	// same Ruby build on the same Debian release, so the compiled gems load there.
-	return []Stage{{Name: "build", From: "ruby:" + v, Steps: steps}}, Runtime{
+	return []Stage{{Name: buildStage, From: fromImage("ruby:" + v), Steps: steps}}, Runtime{
 		From: "ruby:" + v + "-slim",
 		Copies: []Copy{
-			{From: "build", Src: []string{bundlePath + "/"}, Dst: bundlePath + "/", RootOwned: true, Exclude: gemExcludes},
-			{From: "build", Src: []string{"/app/"}, Dst: "/app/"},
+			{From: fromStage(buildStage), Src: []string{bundlePath + "/"}, Dst: bundlePath + "/", RootOwned: true, Exclude: gemExcludes},
+			{From: fromStage(buildStage), Src: []string{"/app/"}, Dst: "/app/"},
 		},
 		Env: rubyEnv,
 		Cmd: start,

@@ -69,7 +69,7 @@ var corepackYarn = func(*Node) []Step {
 	return []Step{
 		Env{"COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"},
 		Env{"COREPACK_ENABLE_AUTO_PIN", "0"},
-		Run{Cmd: "npm install -g --force corepack@" + corepackVersion + " && corepack enable yarn", Caches: []string{"/root/.npm"}},
+		Run{Cmd: "npm install -g --force corepack@" + corepackVersion + " && corepack enable yarn", Caches: caches("/root/.npm")},
 	}
 }
 
@@ -89,7 +89,7 @@ var nodeManagers = map[string]nodeManager{
 			if v == "" {
 				v = pnpmVersion
 			}
-			return []Step{Run{Cmd: "npm install -g pnpm@" + v, Caches: []string{"/root/.npm"}}}
+			return []Step{Run{Cmd: "npm install -g pnpm@" + v, Caches: caches("/root/.npm")}}
 		},
 		install: "pnpm install", frozen: "pnpm install --frozen-lockfile",
 		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
@@ -131,11 +131,11 @@ var nodeManagers = map[string]nodeManager{
 	},
 }
 
-func (m nodeManager) caches() []string {
+func (m nodeManager) caches() []Cache {
 	if m.cache == "" {
 		return nil
 	}
-	return []string{m.cache}
+	return caches(m.cache)
 }
 
 func bunVersion(n *Node) string {
@@ -235,7 +235,7 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 				Caches: m.caches(),
 			})
 		}
-		return Stage{Name: name, From: image, Steps: steps}, nil
+		return Stage{Name: name, From: fromImage(image), Steps: steps}, nil
 	}
 	manifests := []string{"package.json"}
 	if n.Lockfile != "" {
@@ -256,7 +256,7 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 	if prune {
 		steps = append(steps, Run{Cmd: m.prune, Caches: m.caches()})
 	}
-	return Stage{Name: name, From: image, Steps: steps}, nil
+	return Stage{Name: name, From: fromImage(image), Steps: steps}, nil
 }
 
 func workspaceBuild(f *Facts, m nodeManager) (string, error) {
@@ -357,7 +357,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			return nil, Runtime{}, err
 		}
 		rt := Runtime{
-			From:   build.From,
+			From:   build.From.Image,
 			Copies: fw.copies(f),
 			Env:    append([]Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}, fw.env...),
 			Cmd:    append(Cmd{"node"}, fw.cmd...),
@@ -382,7 +382,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		if f.Workspace != nil {
 			app = f.Workspace.App
 		}
-		site := Copy{From: "build", Src: []string{path.Join("/app", app, out) + "/"}, Dst: "/srv/"}
+		site := Copy{From: fromStage(buildStage), Src: []string{path.Join("/app", app, out) + "/"}, Dst: "/srv/"}
 		rt, err := staticRuntime(f, site, true)
 		return []Stage{build}, rt, err
 	}
@@ -392,8 +392,8 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		env = append(env, Env{"NODE_OPTIONS", "--require /app/.pnp.cjs"})
 	}
 	rt := Runtime{
-		From:   build.From,
-		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)}},
+		From:   build.From.Image,
+		Copies: []Copy{{From: fromStage(buildStage), Src: []string{"/app/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)}},
 		Env:    env,
 		Cmd:    start,
 	}
@@ -424,11 +424,11 @@ var nodeFrameworks = []nodeFramework{
 		buildEnv: []Env{{"NEXT_PRIVATE_STANDALONE", "true"}},
 		copies: func(f *Facts) []Copy {
 			copies := []Copy{
-				{From: "build", Src: []string{"/app/.next/standalone/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)},
-				{From: "build", Src: []string{"/app/.next/static/"}, Dst: "/app/.next/static/"},
+				{From: fromStage(buildStage), Src: []string{"/app/.next/standalone/"}, Dst: "/app/", Exclude: nodeModulesExcludes(f)},
+				{From: fromStage(buildStage), Src: []string{"/app/.next/static/"}, Dst: "/app/.next/static/"},
 			}
 			if f.Has("public") {
-				copies = append(copies, Copy{From: "build", Src: []string{"/app/public/"}, Dst: "/app/public/"})
+				copies = append(copies, Copy{From: fromStage(buildStage), Src: []string{"/app/public/"}, Dst: "/app/public/"})
 			}
 			return copies
 		},
@@ -440,7 +440,7 @@ var nodeFrameworks = []nodeFramework{
 		dep:    "nuxt",
 		starts: []string{"", "node .output/server/index.mjs"},
 		copies: func(f *Facts) []Copy {
-			return []Copy{{From: "build", Src: []string{"/app/.output/"}, Dst: "/app/.output/", Exclude: nodeModulesExcludes(f)}}
+			return []Copy{{From: fromStage(buildStage), Src: []string{"/app/.output/"}, Dst: "/app/.output/", Exclude: nodeModulesExcludes(f)}}
 		},
 		cmd: Cmd{".output/server/index.mjs"},
 	},

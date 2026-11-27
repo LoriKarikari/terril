@@ -56,30 +56,60 @@ type Runtime struct {
 type Stage struct {
 	Name    string
 	Workdir string
-	From    string
+	From    From
 	Steps   []Step
 }
+
+// From is what a stage starts from, or what a COPY reads from: an image or an earlier stage. A
+// COPY with neither reads the build context.
+type From struct{ Image, Stage string }
+
+func fromImage(ref string) From  { return From{Image: ref} }
+func fromStage(name string) From { return From{Stage: name} }
+
+func (f From) String() string { return f.Image + f.Stage }
+
+// Stage names that providers refer to across stages.
+const (
+	buildStage   = "build"
+	runtimeStage = "runtime"
+)
 
 type Step interface{ dockerfile() string }
 
 type Run struct {
 	Cmd     string
-	Caches  []string
+	Caches  []Cache
 	Secrets []string
+}
+
+type Cache struct {
+	Target string
+	// Empty is Docker's default, shared.
+	Sharing string
+}
+
+func caches(targets ...string) []Cache {
+	var cs []Cache
+	for _, t := range targets {
+		cs = append(cs, Cache{Target: t})
+	}
+	return cs
 }
 
 type Arg string
 
 type Copy struct {
-	From    string
+	From    From
 	Src     []string
 	Dst     string
 	Exclude []string
 	// Keeps each source's path under Dst, so manifests land in their member's folder.
 	Parents bool
-	Chown   bool
 	// Keeps root as the owner in the runtime image, so the app can't modify these files.
 	RootOwned bool
+	// Set by the runtime stage for every copy that isn't RootOwned.
+	chown bool
 }
 
 type Env struct{ Key, Value string }
@@ -105,7 +135,11 @@ func (r Run) dockerfile() string {
 	var b strings.Builder
 	b.WriteString("RUN ")
 	for _, c := range r.Caches {
-		fmt.Fprintf(&b, "--mount=type=cache,target=%s ", c)
+		fmt.Fprintf(&b, "--mount=type=cache,target=%s", c.Target)
+		if c.Sharing != "" {
+			fmt.Fprintf(&b, ",sharing=%s", c.Sharing)
+		}
+		b.WriteString(" ")
 	}
 	for _, s := range r.Secrets {
 		fmt.Fprintf(&b, "--mount=type=secret,id=%s,env=%s ", s, s)
@@ -117,10 +151,10 @@ func (r Run) dockerfile() string {
 func (c Copy) dockerfile() string {
 	var b strings.Builder
 	b.WriteString("COPY ")
-	if c.From != "" {
+	if c.From != (From{}) {
 		fmt.Fprintf(&b, "--from=%s ", c.From)
 	}
-	if c.Chown {
+	if c.chown {
 		fmt.Fprintf(&b, "--chown=%s ", appUser)
 	}
 	for _, e := range c.Exclude {
@@ -138,7 +172,11 @@ func (f File) dockerfile() string {
 	if f.Executable {
 		chmod = "--chmod=755 "
 	}
-	return "COPY " + chmod + "<<'EOF' " + f.Path + "\n" + f.Content + "EOF"
+	content := f.Content
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return "COPY " + chmod + "<<'EOF' " + f.Path + "\n" + content + "EOF"
 }
 
 func (a Add) dockerfile() string {
@@ -173,7 +211,7 @@ func (p *Plan) ContextExcludes() []string {
 	var whole [][]string
 	var named []string
 	read := func(c Copy) {
-		if c.From != "" {
+		if c.From != (From{}) {
 			return
 		}
 		for _, src := range c.Src {
@@ -227,7 +265,7 @@ func copySource() Copy { return Copy{Src: []string{"."}, Dst: "./", Exclude: sou
 func copyAssets(stages []string) []Step {
 	var steps []Step
 	for _, s := range stages {
-		steps = append(steps, Copy{From: s, Src: []string{assetsDir + "/"}, Dst: "./"})
+		steps = append(steps, Copy{From: fromStage(s), Src: []string{assetsDir + "/"}, Dst: "./"})
 	}
 	return steps
 }
@@ -246,11 +284,11 @@ func (r Runtime) stage() Stage {
 		steps = append(steps, f)
 	}
 	for _, c := range r.Copies {
-		c.Chown = !c.RootOwned
+		c.chown = !c.RootOwned
 		steps = append(steps, c)
 	}
 	steps = append(steps, User(appUser), ClearEntrypoint{}, r.Cmd)
-	return Stage{Name: "runtime", From: r.From, Workdir: r.Workdir, Steps: steps}
+	return Stage{Name: runtimeStage, From: fromImage(r.From), Workdir: r.Workdir, Steps: steps}
 }
 
 // The package lists live in a cache mount, so they never reach a layer. dpkg and debconf
@@ -259,7 +297,7 @@ func aptInstall(packages []string) Run {
 	return Run{
 		Cmd: "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(packages, " ") +
 			" && rm -rf /var/log/apt /var/log/dpkg.log /var/cache/debconf/*-old /var/lib/dpkg/*-old",
-		Caches: []string{"/var/lib/apt/lists,sharing=locked"},
+		Caches: []Cache{{Target: "/var/lib/apt/lists", Sharing: "locked"}},
 	}
 }
 
@@ -269,17 +307,13 @@ func (p *Plan) Dockerfile() string {
 		stages[i].Steps = withBuildEnv(stages[i].Steps, p.BuildEnv)
 	}
 	stages = append(stages, p.Runtime.stage())
-	var names []string
-	for _, s := range stages {
-		names = append(names, s.Name)
-	}
 
 	var b strings.Builder
 	if !p.NoSyntax {
 		b.WriteString("# syntax=docker/dockerfile:1\n")
 	}
 	fmt.Fprintf(&b, "# terril: %s\n", p.Summary())
-	if slices.ContainsFunc(stages, func(s Stage) bool { return strings.Contains(s.From, "${TARGETARCH}") }) {
+	if slices.ContainsFunc(stages, func(s Stage) bool { return strings.Contains(s.From.String(), "${TARGETARCH}") }) {
 		b.WriteString("\nARG TARGETARCH\n")
 	}
 	for _, s := range stages {
@@ -287,10 +321,10 @@ func (p *Plan) Dockerfile() string {
 		if s.Workdir != "" {
 			workdir = s.Workdir
 		}
-		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR %s\n", p.pull(s.From, names), s.Name, workdir)
+		fmt.Fprintf(&b, "\nFROM %s AS %s\nWORKDIR %s\n", p.mirrorRef(s.From), s.Name, workdir)
 		for _, step := range s.Steps {
-			if c, ok := step.(Copy); ok && c.From != "" {
-				c.From = p.pull(c.From, names)
+			if c, ok := step.(Copy); ok {
+				c.From = p.mirrorRef(c.From)
 				step = c
 			}
 			b.WriteString(step.dockerfile() + "\n")
@@ -299,20 +333,35 @@ func (p *Plan) Dockerfile() string {
 	return b.String()
 }
 
-// pull leaves stage names, scratch and images outside Docker's official ones unchanged.
-func (p *Plan) pull(ref string, stages []string) string {
-	if p.OfficialImages == "" || !isImage(ref, stages) {
-		return ref
+// mirrorRef points Docker's official images at OfficialImages. An official image has no
+// registry or owner in its name.
+func (p *Plan) mirrorRef(f From) From {
+	if p.OfficialImages == "" || !f.pulls() || strings.Contains(f.Image, "/") {
+		return f
 	}
-	name := strings.TrimPrefix(ref, "docker.io/library/")
-	if strings.Contains(name, "/") {
-		return ref
-	}
-	return strings.TrimSuffix(p.OfficialImages, "/") + "/" + name
+	return fromImage(strings.TrimSuffix(p.OfficialImages, "/") + "/" + f.Image)
 }
 
-func isImage(ref string, stages []string) bool {
-	return ref != "scratch" && !slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64"))
+// pulls is false for scratch, which is no image at all.
+func (f From) pulls() bool { return f.Image != "" && f.Image != "scratch" }
+
+// Images lists the images the Dockerfile pulls, after OfficialImages applies.
+func (p *Plan) Images() []string {
+	var refs []string
+	add := func(f From) {
+		if f = p.mirrorRef(f); f.pulls() && !slices.Contains(refs, f.Image) {
+			refs = append(refs, f.Image)
+		}
+	}
+	for _, s := range append(slices.Clone(p.Stages), p.Runtime.stage()) {
+		add(s.From)
+		for _, step := range s.Steps {
+			if c, ok := step.(Copy); ok {
+				add(c.From)
+			}
+		}
+	}
+	return refs
 }
 
 // BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.
@@ -323,7 +372,7 @@ const BuildEnvArg = "TERRIL_BUILD_ENV"
 func withBuildEnv(steps []Step, names []string) []Step {
 	argAt := slices.IndexFunc(steps, func(s Step) bool {
 		c, ok := s.(Copy)
-		return ok && c.From == "" && slices.Equal(c.Src, []string{"."})
+		return ok && c.From == (From{}) && slices.Equal(c.Src, []string{"."})
 	})
 	if len(names) == 0 || argAt < 0 {
 		return steps

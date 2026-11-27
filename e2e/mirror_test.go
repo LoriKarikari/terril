@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"os/exec"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,11 +13,6 @@ import (
 )
 
 const officialImagesMirror = "public.ecr.aws/docker/library"
-
-var (
-	imageRefRe  = regexp.MustCompile(`(?m)^FROM (\S+)|--from=(\S+)`)
-	stageNameRe = regexp.MustCompile(`(?m) AS (\S+)$`)
-)
 
 // Built one at a time, because ECR Public allows one anonymous pull per second.
 func TestAppsFromOfficialImagesMirror(t *testing.T) {
@@ -59,15 +53,13 @@ func TestAppsFromOfficialImagesMirror(t *testing.T) {
 				t.Fatalf("NoSyntax is %v, but the Dockerfile starts:\n%s", noSyntax, dockerfile[:min(len(dockerfile), 80)])
 			}
 
-			var stages, mirrored []string
-			for _, m := range stageNameRe.FindAllStringSubmatch(dockerfile, -1) {
-				stages = append(stages, m[1])
-			}
-			for _, m := range imageRefRe.FindAllStringSubmatch(dockerfile, -1) {
-				ref := m[1] + m[2]
+			var mirrored []string
+			for _, ref := range plan.Images() {
+				if !strings.Contains(dockerfile, ref) {
+					t.Fatalf("Images lists %s, which the Dockerfile doesn't pull", ref)
+				}
 				host, _, hasHost := strings.Cut(ref, "/")
 				switch {
-				case ref == "scratch" || slices.Contains(stages, strings.ReplaceAll(ref, "${TARGETARCH}", "amd64")):
 				case strings.HasPrefix(ref, officialImagesMirror+"/"):
 					mirrored = append(mirrored, ref)
 				case !hasHost || host == "docker.io" || !strings.ContainsAny(host, ".:"):

@@ -38,17 +38,17 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	image := "rust:" + rustVersion + "-trixie"
 	// Cargo's package lock is outside these mounts, so builds that share one unpack the same crate
 	// at once and fail. Each concurrent build gets its own.
-	registry := []string{"/usr/local/cargo/registry,sharing=private", "/usr/local/cargo/git,sharing=private"}
+	registry := []Cache{{Target: "/usr/local/cargo/registry", Sharing: "private"}, {Target: "/usr/local/cargo/git", Sharing: "private"}}
 
 	stages := []Stage{
-		{Name: "cargo-chef-amd64", From: "scratch", Steps: []Step{Add{URL: cargoChefURL("x86_64"), SHA256: cargoChefAmd64, Dst: "/cargo-chef.tar.xz"}}},
-		{Name: "cargo-chef-arm64", From: "scratch", Steps: []Step{Add{URL: cargoChefURL("aarch64"), SHA256: cargoChefArm64, Dst: "/cargo-chef.tar.xz"}}},
-		{Name: "cargo-chef-download", From: "cargo-chef-${TARGETARCH}"},
-		{Name: "cargo-chef", From: image, Steps: []Step{
-			Copy{From: "cargo-chef-download", Src: []string{"/cargo-chef.tar.xz"}, Dst: "/tmp/"},
+		{Name: "cargo-chef-amd64", From: fromImage("scratch"), Steps: []Step{Add{URL: cargoChefURL("x86_64"), SHA256: cargoChefAmd64, Dst: "/cargo-chef.tar.xz"}}},
+		{Name: "cargo-chef-arm64", From: fromImage("scratch"), Steps: []Step{Add{URL: cargoChefURL("aarch64"), SHA256: cargoChefArm64, Dst: "/cargo-chef.tar.xz"}}},
+		{Name: "cargo-chef-download", From: fromStage("cargo-chef-${TARGETARCH}")},
+		{Name: "cargo-chef", From: fromImage(image), Steps: []Step{
+			Copy{From: fromStage("cargo-chef-download"), Src: []string{"/cargo-chef.tar.xz"}, Dst: "/tmp/"},
 			Run{Cmd: "tar -xJf /tmp/cargo-chef.tar.xz --strip-components=1 -C /usr/local/bin --wildcards '*/cargo-chef'"},
 		}},
-		{Name: "planner", From: "cargo-chef", Steps: []Step{
+		{Name: "planner", From: fromStage("cargo-chef"), Steps: []Step{
 			Copy{Src: []string{"."}, Dst: "./", Exclude: rustExcludes},
 			Run{Cmd: "cargo chef prepare --recipe-path /recipe.json"},
 		}},
@@ -62,7 +62,7 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		steps = []Step{Copy{Src: []string{r.Toolchain}, Dst: "./"}, Run{Cmd: "rustup toolchain install"}}
 	}
 	steps = append(steps,
-		Copy{From: "planner", Src: []string{"/recipe.json"}, Dst: "/recipe.json"},
+		Copy{From: fromStage("planner"), Src: []string{"/recipe.json"}, Dst: "/recipe.json"},
 		Run{Cmd: "cargo chef cook --release --locked --recipe-path /recipe.json -p " + pkg + " --bin " + bin, Caches: registry},
 		Copy{Src: []string{"."}, Dst: "./", Exclude: rustExcludes},
 	)
@@ -74,9 +74,9 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.needsDebianRuntime() {
 		from = "debian:trixie-slim"
 	}
-	return append(stages, Stage{Name: "build", From: "cargo-chef", Steps: steps}), Runtime{
+	return append(stages, Stage{Name: buildStage, From: fromStage("cargo-chef"), Steps: steps}), Runtime{
 		From:   from,
-		Copies: []Copy{{From: "build", Src: []string{"/out-app"}, Dst: "/app/app"}},
+		Copies: []Copy{{From: fromStage(buildStage), Src: []string{"/out-app"}, Dst: "/app/app"}},
 		Cmd:    Cmd{"/app/app"},
 	}, nil
 }

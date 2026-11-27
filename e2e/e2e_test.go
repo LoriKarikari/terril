@@ -711,6 +711,7 @@ func TestCache(t *testing.T) {
 
 var (
 	summaryRe  = regexp.MustCompile(`(?m)^# terril: (.*)$`)
+	imageRefRe = regexp.MustCompile(`(?m)^FROM (\S+)|--from=(\S+)`)
 	latestRe   = regexp.MustCompile(`[@:]latest\b`)
 	debianRe   = regexp.MustCompile(`(?m)^ID="?debian"?$`)
 	debian13Re = regexp.MustCompile(`(?m)^VERSION_ID="?13"?$`)

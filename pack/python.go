@@ -63,10 +63,10 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if err != nil {
 		return nil, Runtime{}, err
 	}
-	uvCache := []string{"/root/.cache/uv"}
+	uvCache := caches("/root/.cache/uv")
 	steps := []Step{
 		venvPath,
-		Copy{From: "ghcr.io/astral-sh/uv:" + uvVersion, Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
+		Copy{From: fromImage("ghcr.io/astral-sh/uv:" + uvVersion), Src: []string{"/uv"}, Dst: "/usr/local/bin/uv"},
 		Env{"UV_PYTHON", v},
 		Env{"UV_PROJECT_ENVIRONMENT", venv},
 		Env{"VIRTUAL_ENV", venv},
@@ -131,7 +131,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Env{"POETRY_VIRTUALENVS_IN_PROJECT", "true"},
 			Env{"POETRY_NO_INTERACTION", "1"},
 			Copy{Src: []string{"pyproject.toml", "poetry.lock"}, Dst: "./"},
-			Run{Cmd: "poetry install --only main --no-root", Caches: []string{"/root/.cache/pypoetry"}},
+			Run{Cmd: "poetry install --only main --no-root", Caches: caches("/root/.cache/pypoetry")},
 		)
 	}
 	if py.Manager != "uv" {
@@ -153,18 +153,18 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	rt := Runtime{
 		From:   runtimeImage,
-		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
+		Copies: []Copy{{From: fromStage(buildStage), Src: []string{"/app/"}, Dst: "/app/"}},
 		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}},
 		Cmd:    start,
 	}
 	if !debian {
-		rt.Copies = append([]Copy{{From: "build", Src: []string{pythonDir + "/"}, Dst: pythonDir + "/", RootOwned: true, Exclude: pythonRuntimeExcludes}}, rt.Copies...)
+		rt.Copies = append([]Copy{{From: fromStage(buildStage), Src: []string{pythonDir + "/"}, Dst: pythonDir + "/", RootOwned: true, Exclude: pythonRuntimeExcludes}}, rt.Copies...)
 		rt.Env = append(rt.Env, Env{"SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt"})
 	}
 	if ws := f.UvWorkspace; ws != nil {
 		rt.Workdir = "/app/" + ws.App
 	}
-	return []Stage{{Name: "build", From: buildImage, Steps: steps}}, rt, nil
+	return []Stage{{Name: buildStage, From: fromImage(buildImage), Steps: steps}}, rt, nil
 }
 
 // uvicorn can't read PORT and distroless has no shell, so Python adds --port at startup.

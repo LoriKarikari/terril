@@ -77,28 +77,28 @@ func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	}
 	var stages []Stage
 	for _, b := range frankenphpBuilds {
-		stages = append(stages, Stage{Name: "frankenphp-" + b.arch, From: "scratch", Steps: []Step{Add{
+		stages = append(stages, Stage{Name: "frankenphp-" + b.arch, From: fromImage("scratch"), Steps: []Step{Add{
 			URL:        "https://github.com/php/frankenphp/releases/download/" + frankenphpVersion + "/frankenphp-linux-" + b.asset,
 			SHA256:     b.sha256,
 			Dst:        "/frankenphp",
 			Executable: true,
 		}}})
 	}
-	stages = append(stages, Stage{Name: "frankenphp", From: "frankenphp-${TARGETARCH}"})
+	stages = append(stages, Stage{Name: "frankenphp", From: fromStage("frankenphp-${TARGETARCH}")})
 
 	steps := []Step{
-		Copy{From: "frankenphp", Src: []string{"/frankenphp"}, Dst: "/usr/local/bin/frankenphp"},
+		Copy{From: fromStage("frankenphp"), Src: []string{"/frankenphp"}, Dst: "/usr/local/bin/frankenphp"},
 		File{Path: "/usr/local/bin/php", Content: phpWrapper, Executable: true},
-		Copy{From: "gcr.io/distroless/static-debian13", Src: []string{"/etc/ssl/certs/"}, Dst: "/etc/ssl/certs/"},
+		Copy{From: fromImage("gcr.io/distroless/static-debian13"), Src: []string{"/etc/ssl/certs/"}, Dst: "/etc/ssl/certs/"},
 	}
 	if f.PHP.Composer {
-		cache := []string{"/root/.cache/composer"}
+		cache := caches("/root/.cache/composer")
 		steps = append(steps,
-			Copy{From: "composer:" + composerVersion, Src: []string{"/usr/bin/composer"}, Dst: "/usr/local/bin/composer"},
+			Copy{From: fromImage("composer:" + composerVersion), Src: []string{"/usr/bin/composer"}, Dst: "/usr/local/bin/composer"},
 			// Composer runs @php scripts with PHP_BINARY, which would otherwise be frankenphp itself.
 			Env{"PHP_BINARY", "/usr/local/bin/php"},
 			Env{"COMPOSER_ALLOW_SUPERUSER", "1"},
-			Env{"COMPOSER_CACHE_DIR", cache[0]},
+			Env{"COMPOSER_CACHE_DIR", cache[0].Target},
 			Copy{Src: []string{"composer.json", "composer.lock"}, Dst: "./"},
 			Run{Cmd: "composer install --no-dev --no-interaction --no-progress --prefer-dist --no-scripts --no-autoloader", Caches: cache},
 			copySource(),
@@ -115,13 +115,13 @@ func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		env = append(env, Env{"LOG_CHANNEL", "stderr"})
 	}
 	config := "/etc/frankenphp/Caddyfile"
-	return append(stages, Stage{Name: "build", From: "debian:trixie-slim", Steps: steps}), Runtime{
+	return append(stages, Stage{Name: buildStage, From: fromImage("debian:trixie-slim"), Steps: steps}), Runtime{
 		From:  "gcr.io/distroless/static-debian13",
 		Env:   env,
 		Files: []File{{Path: config, Content: fmt.Sprintf(frankenphpCaddyfile, path.Join("/app", f.PHP.DocRoot))}},
 		Copies: []Copy{
-			{From: "frankenphp", Src: []string{"/frankenphp"}, Dst: "/usr/local/bin/frankenphp", RootOwned: true},
-			{From: "build", Src: []string{"/app/"}, Dst: "/app/"},
+			{From: fromStage("frankenphp"), Src: []string{"/frankenphp"}, Dst: "/usr/local/bin/frankenphp", RootOwned: true},
+			{From: fromStage(buildStage), Src: []string{"/app/"}, Dst: "/app/"},
 		},
 		Cmd: Cmd{"/usr/local/bin/frankenphp", "run", "--config", config, "--adapter", "caddyfile"},
 	}, nil

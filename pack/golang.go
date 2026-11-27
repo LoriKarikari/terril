@@ -55,8 +55,8 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.Has("go.sum") {
 		mods = append(mods, "go.sum")
 	}
-	download := Run{Cmd: "go mod download", Caches: []string{"/go/pkg/mod"}}
-	caches := []string{"/go/pkg/mod", "/root/.cache/go-build"}
+	download := Run{Cmd: "go mod download", Caches: caches("/go/pkg/mod")}
+	goCaches := caches("/go/pkg/mod", "/root/.cache/go-build")
 	steps := []Step{Copy{Src: mods, Dst: "./"}, download, copySource()}
 	// A replace with a local path needs that folder before modules can download.
 	if slices.ContainsFunc(f.Go.Replace, func(r *modfile.Replace) bool { return modfile.IsDirectoryPath(r.New.Path) }) {
@@ -74,17 +74,17 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		steps = append(steps, Run{
 			Cmd: "cgo=$(CGO_ENABLED=1 go list -deps -f '{{if and .CgoFiles (not .Standard)}}{{.ImportPath}} {{end}}' " + shellQuote(pkg) + ") && " +
 				`{ [ -z "$cgo" ] || { echo "terril: this app needs cgo for $cgo, which terril didn't detect. Please open an issue." >&2; exit 1; }; }`,
-			Caches: caches,
+			Caches: goCaches,
 		})
 	}
-	steps = append(steps, Run{Cmd: "CGO_ENABLED=" + cgo + " go build -trimpath -ldflags='-s -w' -o /out/app " + shellQuote(pkg), Caches: caches})
+	steps = append(steps, Run{Cmd: "CGO_ENABLED=" + cgo + " go build -trimpath -ldflags='-s -w' -o /out/app " + shellQuote(pkg), Caches: goCaches})
 
 	if f.needsDebianRuntime() {
 		base = "debian:trixie-slim"
 	}
-	return []Stage{{Name: "build", From: image, Steps: steps}}, Runtime{
+	return []Stage{{Name: buildStage, From: fromImage(image), Steps: steps}}, Runtime{
 		From:   base,
-		Copies: []Copy{{From: "build", Src: []string{"/out/app"}, Dst: "/app/app"}},
+		Copies: []Copy{{From: fromStage(buildStage), Src: []string{"/out/app"}, Dst: "/app/app"}},
 		Cmd:    Cmd{"/app/app"},
 	}, nil
 }

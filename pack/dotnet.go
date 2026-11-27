@@ -92,7 +92,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	steps = append(steps, copyAssets(assets)...)
 	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote(d.Project) + " -f " + shellQuote(d.TargetFramework) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
 
-	hook := Stage{Name: "port-hook", From: sdk, Workdir: "/hook", Steps: []Step{
+	hook := Stage{Name: "port-hook", From: fromImage(sdk), Workdir: "/hook", Steps: []Step{
 		Env{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"},
 		Env{"DOTNET_NOLOGO", "1"},
 		File{Path: "/hook/TerrilPort.csproj", Content: fmt.Sprintf(portHookProject, d.TargetFramework)},
@@ -114,11 +114,11 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.needsDebianRuntime() {
 		from = dotnetImages + kind + ":" + version
 	}
-	return []Stage{hook, {Name: "build", From: sdk, Steps: steps}}, Runtime{
+	return []Stage{hook, {Name: buildStage, From: fromImage(sdk), Steps: steps}}, Runtime{
 		From: from,
 		Copies: []Copy{
-			{From: "port-hook", Src: []string{"/out/TerrilPort.dll"}, Dst: "/terril/TerrilPort.dll", RootOwned: true},
-			{From: "build", Src: []string{"/out/"}, Dst: "/app/"},
+			{From: fromStage("port-hook"), Src: []string{"/out/TerrilPort.dll"}, Dst: "/terril/TerrilPort.dll", RootOwned: true},
+			{From: fromStage(buildStage), Src: []string{"/out/"}, Dst: "/app/"},
 		},
 		Env: []Env{{"DOTNET_STARTUP_HOOKS", "/terril/TerrilPort.dll"}},
 		Cmd: cmd,
