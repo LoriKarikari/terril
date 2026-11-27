@@ -11,9 +11,8 @@ var rubyProvider = provider{
 		}
 		return Primary
 	},
-	plan:     planRuby,
-	versions: &rubyVersions,
-	version:  rubyVersion,
+	plan:    planRuby,
+	runtime: &runtime{versions: &rubyVersions, version: rubyVersion},
 }
 
 const bundlePath = "/usr/local/bundle"

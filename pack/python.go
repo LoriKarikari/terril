@@ -11,9 +11,8 @@ var pythonProvider = provider{
 		}
 		return Primary
 	},
-	plan:     planPython,
-	versions: &pythonVersions,
-	version:  pythonVersion,
+	plan:    planPython,
+	runtime: &runtime{versions: &pythonVersions, version: pythonVersion},
 }
 
 const venv = "/app/.venv"

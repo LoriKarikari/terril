@@ -3,13 +3,17 @@ package pack
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
 )
 
-var exactVersionRe = regexp.MustCompile(`^\d+(\.\d+){0,2}$`)
+var (
+	exactVersionRe      = regexp.MustCompile(`^\d+(\.\d+){0,2}$`)
+	compatibleReleaseRe = regexp.MustCompile(`~=\s*(\d+\.\d+)(\.\d+)?`)
+)
 
 const longDate = "January 2, 2006"
 
@@ -64,20 +68,36 @@ var (
 // otherwise to the newest supported version that fits.
 func (rv runtimeVersions) pick(want string, today time.Time) (string, error) {
 	want = strings.TrimSpace(want)
+	// A version shorter than the table's, such as Python "3", names a line, as uv and pyenv read it.
+	if exactVersionRe.MatchString(want) && strings.Count(want, ".") < strings.Count(rv.releases[0].version, ".") {
+		want += ".x"
+	}
 	if exactVersionRe.MatchString(want) {
+		v, err := semver.NewVersion(want)
+		if err != nil {
+			return "", fmt.Errorf("can't read %s version %q", rv.name, want)
+		}
 		r, ok := rv.release(want)
 		switch {
 		case ok && !today.Before(r.refuseFrom()):
 			return "", fmt.Errorf("%s %s reached end of life on %s; terril builds %s %s", rv.name, r.version, r.eol.Format(longDate), rv.name, strings.Join(rv.supported(today), ", "))
-		case !ok && !semver.MustParse(want).GreaterThan(semver.MustParse(rv.releases[0].version)):
+		case !ok && !v.GreaterThan(semver.MustParse(rv.releases[0].version)):
 			return "", fmt.Errorf("%s %s is out of support; terril builds %s %s", rv.name, want, rv.name, strings.Join(rv.supported(today), ", "))
 		}
 		return want, nil
 	}
 	var c *semver.Constraints
 	if want != "" {
-		// PEP 440 spellings: "~=3.11" has the same lower bound as ">=3.11", "==3.12.*" is "3.12.x".
-		normalized := strings.NewReplacer("~=", ">=", "==", "=", ".*", ".x").Replace(want)
+		// PEP 440: "~=3.11.2" allows 3.11.x from 3.11.2, which is semver's ~, and "~=3.11" allows
+		// 3.x from 3.11, which is semver's ^. "==3.12.*" is "3.12.x".
+		normalized := compatibleReleaseRe.ReplaceAllStringFunc(want, func(m string) string {
+			g := compatibleReleaseRe.FindStringSubmatch(m)
+			if g[2] != "" {
+				return "~" + g[1] + g[2]
+			}
+			return "^" + g[1]
+		})
+		normalized = strings.NewReplacer("==", "=", ".*", ".x").Replace(normalized)
 		var err error
 		if c, err = semver.NewConstraint(normalized); err != nil {
 			return "", fmt.Errorf("can't read %s version %q", rv.name, want)
@@ -85,11 +105,18 @@ func (rv runtimeVersions) pick(want string, today time.Time) (string, error) {
 	}
 	supported := rv.supported(today)
 	for _, v := range append([]string{rv.def}, supported...) {
-		if r, _ := rv.release(v); today.Before(r.refuseFrom()) && (c == nil || c.Check(semver.MustParse(v))) {
+		if slices.Contains(supported, v) && (c == nil || fits(c, v)) {
 			return v, nil
 		}
 	}
 	return "", fmt.Errorf("no supported %s version satisfies %q (supported: %s)", rv.name, want, strings.Join(supported, ", "))
+}
+
+// A table entry is a release line, and the build installs the line's newest patch, so the line
+// fits when its first or its newest version does.
+func fits(c *semver.Constraints, line string) bool {
+	newest := line + strings.Repeat(".99999", 2-strings.Count(line, "."))
+	return c.Check(semver.MustParse(line)) || c.Check(semver.MustParse(newest))
 }
 
 func (rv runtimeVersions) release(v string) (release, bool) {

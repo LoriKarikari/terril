@@ -120,8 +120,8 @@ func Read(dir string) (*Facts, error) {
 			return nil, fmt.Errorf("%s/pyproject.toml has no project name, which uv needs to select it", ws.App)
 		}
 		f.Python.Manager = "uv"
-		if f.Python.Version == "" {
-			f.Python.Version = firstLine(ws.Root, ".python-version")
+		if v := firstLine(ws.Root, ".python-version"); v != "" && !f.Has(".python-version") {
+			f.Python.Version = v
 		}
 	}
 	if s, ok := f.read("go.mod"); ok {

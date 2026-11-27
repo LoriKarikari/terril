@@ -20,14 +20,13 @@ var nodeProvider = provider{
 		}
 		return Primary
 	},
-	plan:     planNode,
-	versions: &nodeVersions,
-	version: func(f *Facts) (string, error) {
+	plan: planNode,
+	runtime: &runtime{versions: &nodeVersions, version: func(f *Facts) (string, error) {
 		if f.Node.Manager == "bun" {
 			return "", nil
 		}
 		return nodeVersion(f)
-	},
+	}},
 	assetStage: func(f *Facts, name string) (Stage, error) {
 		return nodeBuild(f, name, nil, false)
 	},

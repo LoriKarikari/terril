@@ -22,8 +22,12 @@ type provider struct {
 	detect     func(*Facts) Role
 	plan       func(f *Facts, assetStages []string) ([]Stage, Runtime, error)
 	assetStage func(f *Facts, name string) (Stage, error)
-	versions   *runtimeVersions
-	version    func(*Facts) (string, error)
+	runtime    *runtime
+}
+
+type runtime struct {
+	versions *runtimeVersions
+	version  func(*Facts) (string, error)
 }
 
 var providers = []provider{goProvider, rustProvider, pythonProvider, rubyProvider, phpProvider, dotnetProvider, nodeProvider, staticProvider}
@@ -80,14 +84,14 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	plan.Stages = append(plan.Stages, stages...)
 	plan.Runtime = rt
 	for _, p := range providers {
-		if p.version == nil || p.name != primary.name && !slices.Contains(plan.Assets, p.name) {
+		if p.runtime == nil || p.name != primary.name && !slices.Contains(plan.Assets, p.name) {
 			continue
 		}
-		v, err := p.version(f)
+		v, err := p.runtime.version(f)
 		if err != nil {
 			return nil, err
 		}
-		if w := p.versions.warning(v, f.Today); w != "" {
+		if w := p.runtime.versions.warning(v, f.Today); w != "" {
 			plan.Warnings = append(plan.Warnings, Warning{RuntimeEndOfLife, w})
 		}
 	}

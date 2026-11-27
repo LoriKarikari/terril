@@ -16,9 +16,8 @@ var dotnetProvider = provider{
 		}
 		return Primary
 	},
-	plan:     planDotNet,
-	versions: &dotnetVersions,
-	version:  dotnetVersion,
+	plan:    planDotNet,
+	runtime: &runtime{versions: &dotnetVersions, version: dotnetVersion},
 }
 
 const dotnetImages = "mcr.microsoft.com/dotnet/"
