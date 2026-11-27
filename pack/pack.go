@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,6 +15,13 @@ const (
 	// Fallback runs the app when no provider has the Primary role.
 	Fallback
 )
+
+func primaryIf(detected bool) Role {
+	if detected {
+		return Primary
+	}
+	return 0
+}
 
 type provider struct {
 	name string
@@ -150,7 +158,7 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 
 	switch len(candidates) {
 	case 0:
-		return provider{}, fmt.Errorf("no package.json, requirements.txt, pyproject.toml, Gemfile, composer.json, index.php, *.csproj, Cargo.toml, go.mod or index.html found; don't know how to build this app")
+		return provider{}, errors.New("no package.json, requirements.txt, pyproject.toml, Gemfile, composer.json, index.php, *.csproj, Cargo.toml, go.mod or index.html found; don't know how to build this app")
 	case 1:
 		return candidates[0], nil
 	}

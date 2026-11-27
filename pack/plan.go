@@ -260,7 +260,23 @@ func covers(pattern, name string) bool {
 	return false
 }
 
-func copySource() Copy { return Copy{Src: []string{"."}, Dst: "./", Exclude: sourceExcludes} }
+func copySource() Copy {
+	return Copy{Src: []string{"."}, Dst: "./", Exclude: slices.Clone(sourceExcludes)}
+}
+
+// archDownload adds a pinned file per arch in its own scratch stage, and an alias stage that
+// picks the build's arch, so a stage can copy the file from alias.
+func archDownload(name, alias string, dst Add, amd64, arm64 Add) []Stage {
+	var stages []Stage
+	for _, d := range []struct {
+		arch string
+		add  Add
+	}{{"amd64", amd64}, {"arm64", arm64}} {
+		d.add.Dst, d.add.Executable = dst.Dst, dst.Executable
+		stages = append(stages, Stage{Name: name + "-" + d.arch, From: fromImage("scratch"), Steps: []Step{d.add}})
+	}
+	return append(stages, Stage{Name: alias, From: fromStage(name + "-${TARGETARCH}")})
+}
 
 func copyAssets(stages []string) []Step {
 	var steps []Step

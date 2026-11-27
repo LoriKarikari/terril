@@ -5,13 +5,8 @@ import "slices"
 var rustProvider = provider{
 	name:     "rust",
 	manifest: "Cargo.toml",
-	detect: func(f *Facts) Role {
-		if f.Rust == nil {
-			return 0
-		}
-		return Primary
-	},
-	plan: planRust,
+	detect:   func(f *Facts) Role { return primaryIf(f.Rust != nil) },
+	plan:     planRust,
 }
 
 // pin: datasource=docker depName=rust
@@ -40,10 +35,10 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	// at once and fail. Each concurrent build gets its own.
 	registry := []Cache{{Target: "/usr/local/cargo/registry", Sharing: "private"}, {Target: "/usr/local/cargo/git", Sharing: "private"}}
 
-	stages := []Stage{
-		{Name: "cargo-chef-amd64", From: fromImage("scratch"), Steps: []Step{Add{URL: cargoChefURL("x86_64"), SHA256: cargoChefAmd64, Dst: "/cargo-chef.tar.xz"}}},
-		{Name: "cargo-chef-arm64", From: fromImage("scratch"), Steps: []Step{Add{URL: cargoChefURL("aarch64"), SHA256: cargoChefArm64, Dst: "/cargo-chef.tar.xz"}}},
-		{Name: "cargo-chef-download", From: fromStage("cargo-chef-${TARGETARCH}")},
+	stages := archDownload("cargo-chef", "cargo-chef-download", Add{Dst: "/cargo-chef.tar.xz"},
+		Add{URL: cargoChefURL("x86_64"), SHA256: cargoChefAmd64},
+		Add{URL: cargoChefURL("aarch64"), SHA256: cargoChefArm64})
+	stages = append(stages, []Stage{
 		{Name: "cargo-chef", From: fromImage(image), Steps: []Step{
 			Copy{From: fromStage("cargo-chef-download"), Src: []string{"/cargo-chef.tar.xz"}, Dst: "/tmp/"},
 			Run{Cmd: "tar -xJf /tmp/cargo-chef.tar.xz --strip-components=1 -C /usr/local/bin --wildcards '*/cargo-chef'"},
@@ -52,7 +47,7 @@ func planRust(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Copy{Src: []string{"."}, Dst: "./", Exclude: rustExcludes},
 			Run{Cmd: "cargo chef prepare --recipe-path /recipe.json"},
 		}},
-	}
+	}...)
 	pkg := shellQuote(r.Package)
 	bin := shellQuote(r.Bin)
 	var steps []Step

@@ -111,7 +111,7 @@ func Read(dir string) (*Facts, error) {
 	f := &Facts{Dir: dir, Today: time.Now().UTC()}
 	// The rename hint goes first, so no other error hides it.
 	if f.Has("wolkpack.toml") {
-		return nil, fmt.Errorf("wolkpack.toml is now terril.toml; rename the file")
+		return nil, errors.New("wolkpack.toml is now terril.toml; rename the file")
 	}
 	err := f.readAll()
 	// A file that couldn't be read explains any error after it, such as a missing manifest.
@@ -808,7 +808,7 @@ func readRuby(f *Facts) (*Ruby, error) {
 	}
 	lock, ok := f.read("Gemfile.lock")
 	if !ok {
-		f.cantBuild("ruby", fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it"))
+		f.cantBuild("ruby", errors.New("no Gemfile.lock next to the Gemfile; run bundle lock and commit it"))
 		return &Ruby{}, nil
 	}
 	parsed := parseGemfileLock(lock)
@@ -816,7 +816,7 @@ func readRuby(f *Facts) (*Ruby, error) {
 	platforms := parsed.fields("PLATFORMS")
 	switch {
 	case len(platforms) == 0:
-		f.cantBuild("ruby", fmt.Errorf("the Gemfile.lock lists no platforms; run bundle lock --add-platform x86_64-linux aarch64-linux"))
+		f.cantBuild("ruby", errors.New("the Gemfile.lock lists no platforms; run bundle lock --add-platform x86_64-linux aarch64-linux"))
 	case !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }):
 		f.cantBuild("ruby", fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
 			strings.Join(platforms, ", ")))
@@ -849,7 +849,7 @@ func readPHP(f *Facts) (*PHP, error) {
 		p.DocRoot = "public"
 	case f.Has("index.php"):
 	case p.Composer:
-		f.cantBuild("php", fmt.Errorf("composer.json found, but no index.php in public/ or the app root"))
+		f.cantBuild("php", errors.New("composer.json found, but no index.php in public/ or the app root"))
 		return p, nil
 	default:
 		return nil, nil
@@ -859,7 +859,7 @@ func readPHP(f *Facts) (*PHP, error) {
 	}
 	lock, ok := f.read("composer.lock")
 	if !ok {
-		f.cantBuild("php", fmt.Errorf("composer.json has no composer.lock; run composer update and commit it"))
+		f.cantBuild("php", errors.New("composer.json has no composer.lock; run composer update and commit it"))
 		return p, nil
 	}
 	var doc struct {
@@ -1039,7 +1039,7 @@ func readRust(f *Facts) (*Rust, error) {
 		return nil, fmt.Errorf("%s: %w", filepath.Join(f.Dir, "Cargo.toml"), err)
 	}
 	if !f.Has("Cargo.lock") {
-		f.cantBuild("rust", fmt.Errorf("no Cargo.lock next to Cargo.toml; run cargo generate-lockfile and commit it"))
+		f.cantBuild("rust", errors.New("no Cargo.lock next to Cargo.toml; run cargo generate-lockfile and commit it"))
 		return &Rust{}, nil
 	}
 	if manifest.Package != nil && manifest.Package.DefaultRun != "" {
@@ -1102,7 +1102,7 @@ func readRust(f *Facts) (*Rust, error) {
 	}
 	switch len(bins) {
 	case 0:
-		f.cantBuild("rust", fmt.Errorf("no Rust binary: add src/main.rs or a [[bin]] to Cargo.toml"))
+		f.cantBuild("rust", errors.New("no Rust binary: add src/main.rs or a [[bin]] to Cargo.toml"))
 		return &Rust{}, nil
 	case 1:
 		return &Rust{Package: bins[0].pkg, Bin: bins[0].name, Toolchain: rustToolchain(f)}, nil
@@ -1128,7 +1128,7 @@ func readRust(f *Facts) (*Rust, error) {
 func rustToolchain(f *Facts) string {
 	switch {
 	case f.Has("rust-toolchain.toml") && f.Has("rust-toolchain"):
-		f.cantBuild("rust", fmt.Errorf("rust-toolchain and rust-toolchain.toml are both here; keep one"))
+		f.cantBuild("rust", errors.New("rust-toolchain and rust-toolchain.toml are both here; keep one"))
 		return ""
 	case f.Has("rust-toolchain.toml"):
 		return "rust-toolchain.toml"

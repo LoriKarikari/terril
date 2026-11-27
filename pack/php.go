@@ -1,20 +1,17 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"slices"
 )
 
 var phpProvider = provider{
 	name:     "php",
 	manifest: "index.php or public/index.php",
-	detect: func(f *Facts) Role {
-		if f.PHP == nil {
-			return 0
-		}
-		return Primary
-	},
-	plan: planPHP,
+	detect:   func(f *Facts) Role { return primaryIf(f.PHP != nil) },
+	plan:     planPHP,
 }
 
 // FrankenPHP's static build embeds PHP and its extensions in one binary, so the runtime
@@ -32,9 +29,8 @@ const frankenphpAmd64 = "f88db9972ddac5e4c097c8b703e585255e181411687e5a1f79ca4b6
 // pin: datasource=github-release-attachments depName=php/frankenphp digestVersion=v1.13.3
 const frankenphpArm64 = "73bd5e8b82cb48e52c49ec124f1eba03bfa5608365c770372606ec4846fb929e"
 
-var frankenphpBuilds = []struct{ arch, asset, sha256 string }{
-	{"amd64", "x86_64", frankenphpAmd64},
-	{"arm64", "aarch64", frankenphpArm64},
+func frankenphpURL(asset string) string {
+	return "https://github.com/php/frankenphp/releases/download/" + frankenphpVersion + "/frankenphp-linux-" + asset
 }
 
 // pin: datasource=docker depName=composer
@@ -52,12 +48,8 @@ done
 exec /usr/local/bin/frankenphp php-cli "$@"
 `
 
-// Admin and automatic HTTPS are off because the container sits behind a proxy. The image's
-// PHP files never change, so opcache skips checking their timestamps.
-const frankenphpCaddyfile = `{
-	admin off
-	auto_https off
-	frankenphp {
+// The image's PHP files never change, so opcache skips checking their timestamps.
+const frankenphpCaddyfile = "{\n" + caddyGlobal + `	frankenphp {
 		php_ini display_errors Off
 		php_ini expose_php Off
 		php_ini opcache.validate_timestamps 0
@@ -73,18 +65,11 @@ const frankenphpCaddyfile = `{
 
 func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	if f.needsDebianRuntime() {
-		return nil, Runtime{}, fmt.Errorf("PHP apps run on a distroless image with FrankenPHP, which has no shell or apt; remove start and packages from terril.toml")
+		return nil, Runtime{}, errors.New("PHP apps run on a distroless image with FrankenPHP, which has no shell or apt; remove start and packages from terril.toml")
 	}
-	var stages []Stage
-	for _, b := range frankenphpBuilds {
-		stages = append(stages, Stage{Name: "frankenphp-" + b.arch, From: fromImage("scratch"), Steps: []Step{Add{
-			URL:        "https://github.com/php/frankenphp/releases/download/" + frankenphpVersion + "/frankenphp-linux-" + b.asset,
-			SHA256:     b.sha256,
-			Dst:        "/frankenphp",
-			Executable: true,
-		}}})
-	}
-	stages = append(stages, Stage{Name: "frankenphp", From: fromStage("frankenphp-${TARGETARCH}")})
+	stages := archDownload("frankenphp", "frankenphp", Add{Dst: "/frankenphp", Executable: true},
+		Add{URL: frankenphpURL("x86_64"), SHA256: frankenphpAmd64},
+		Add{URL: frankenphpURL("aarch64"), SHA256: frankenphpArm64})
 
 	steps := []Step{
 		Copy{From: fromStage("frankenphp"), Src: []string{"/frankenphp"}, Dst: "/usr/local/bin/frankenphp"},
@@ -110,7 +95,7 @@ func planPHP(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		steps = append(steps, copyAssets(assets)...)
 	}
 
-	env := []Env{{"XDG_CONFIG_HOME", "/tmp/caddy"}, {"XDG_DATA_HOME", "/tmp/caddy"}}
+	env := slices.Clone(caddyEnv)
 	if f.PHP.Packages["laravel/framework"] {
 		env = append(env, Env{"LOG_CHANNEL", "stderr"})
 	}

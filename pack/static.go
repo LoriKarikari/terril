@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 )
@@ -31,10 +32,13 @@ var siteExcludes = append(slices.Clone(sourceExcludes), "**/.*", "terril.toml", 
 const caddyVersion = "2.11-alpine"
 
 // Admin and automatic HTTPS are off because the container sits behind a proxy.
-const caddyfile = `{
-	admin off
-	auto_https off
-}
+const caddyGlobal = "\tadmin off\n\tauto_https off\n"
+
+// Caddy writes its config and certificate state under these, and HOME isn't writable by UID 1000
+// in every image.
+var caddyEnv = []Env{{"XDG_CONFIG_HOME", "/tmp/caddy"}, {"XDG_DATA_HOME", "/tmp/caddy"}}
+
+const caddyfile = "{\n" + caddyGlobal + `}
 
 :{$PORT} {
 	root * /srv
@@ -45,10 +49,10 @@ const caddyfile = `{
 
 func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 	if len(f.Config.Packages) > 0 {
-		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no apt; remove packages from terril.toml")
+		return Runtime{}, errors.New("static sites run on a distroless image, which has no apt; remove packages from terril.toml")
 	}
 	if f.Start != "" {
-		return Runtime{}, fmt.Errorf("static sites run on a distroless image, which has no shell for a start command; remove start from terril.toml, or the web: line from the Procfile")
+		return Runtime{}, errors.New("static sites run on a distroless image, which has no shell for a start command; remove start from terril.toml, or the web: line from the Procfile")
 	}
 	fallback := ""
 	if spa {
@@ -58,7 +62,7 @@ func staticRuntime(f *Facts, site Copy, spa bool) (Runtime, error) {
 	return Runtime{
 		From:    "gcr.io/distroless/static-debian13",
 		Workdir: "/srv",
-		Env:     []Env{{"XDG_CONFIG_HOME", "/tmp/caddy"}, {"XDG_DATA_HOME", "/tmp/caddy"}},
+		Env:     slices.Clone(caddyEnv),
 		Files:   []File{{Path: "/etc/caddy/Caddyfile", Content: fmt.Sprintf(caddyfile, fallback)}},
 		Copies: []Copy{
 			{From: fromImage("caddy:" + caddyVersion), Src: []string{"/usr/bin/caddy"}, Dst: "/usr/bin/caddy", RootOwned: true},

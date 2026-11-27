@@ -10,14 +10,9 @@ import (
 var dotnetProvider = provider{
 	name:     "dotnet",
 	manifest: ".csproj file",
-	detect: func(f *Facts) Role {
-		if f.DotNet == nil {
-			return 0
-		}
-		return Primary
-	},
-	plan:    planDotNet,
-	runtime: &runtime{versions: &dotnetVersions, version: dotnetVersion},
+	detect:   func(f *Facts) Role { return primaryIf(f.DotNet != nil) },
+	plan:     planDotNet,
+	runtime:  &runtime{versions: &dotnetVersions, version: dotnetVersion},
 }
 
 const dotnetImages = "mcr.microsoft.com/dotnet/"
@@ -57,6 +52,9 @@ func dotnetVersion(f *Facts) (string, error) {
 	return v, nil
 }
 
+// The SDK sends telemetry and prints a welcome banner on first use unless these are set.
+var dotnetQuiet = [2]Env{{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"}, {"DOTNET_NOLOGO", "1"}}
+
 func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	d := f.DotNet
 	version, err := dotnetVersion(f)
@@ -75,15 +73,14 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		}
 	}
 	restore := "dotnet restore " + shellQuote(d.Project)
-	if f.Has(path.Join(path.Dir(d.Project), "packages.lock.json")) {
-		manifests = append(manifests, path.Join(path.Dir(d.Project), "packages.lock.json"))
+	if lock := path.Join(path.Dir(d.Project), "packages.lock.json"); f.Has(lock) {
+		manifests = append(manifests, lock)
 		restore += " --locked-mode"
 	}
 	// Packages stay in the layer, not a cache mount: publish --no-restore needs them, and a
 	// cache mount can be emptied between the two steps.
 	steps := []Step{
-		Env{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"},
-		Env{"DOTNET_NOLOGO", "1"},
+		dotnetQuiet[0], dotnetQuiet[1],
 		Copy{Src: manifests, Dst: "./", Parents: true},
 		Run{Cmd: restore},
 		// A checkout's bin and obj are host build output, and obj would replace this restore's.
@@ -93,8 +90,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote(d.Project) + " -f " + shellQuote(d.TargetFramework) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
 
 	hook := Stage{Name: "port-hook", From: fromImage(sdk), Workdir: "/hook", Steps: []Step{
-		Env{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"},
-		Env{"DOTNET_NOLOGO", "1"},
+		dotnetQuiet[0], dotnetQuiet[1],
 		File{Path: "/hook/TerrilPort.csproj", Content: fmt.Sprintf(portHookProject, d.TargetFramework)},
 		File{Path: "/hook/StartupHook.cs", Content: portHook},
 		Run{Cmd: "dotnet build -c Release -o /out"},

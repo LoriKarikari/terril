@@ -1,18 +1,16 @@
 package pack
 
-import "fmt"
+import (
+	"errors"
+	"slices"
+)
 
 var rubyProvider = provider{
 	name:     "ruby",
 	manifest: "Gemfile",
-	detect: func(f *Facts) Role {
-		if f.Ruby == nil {
-			return 0
-		}
-		return Primary
-	},
-	plan:    planRuby,
-	runtime: &runtime{versions: &rubyVersions, version: rubyVersion},
+	detect:   func(f *Facts) Role { return primaryIf(f.Ruby != nil) },
+	plan:     planRuby,
+	runtime:  &runtime{versions: &rubyVersions, version: rubyVersion},
 }
 
 const bundlePath = "/usr/local/bundle"
@@ -33,7 +31,7 @@ func planRuby(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	r := f.Ruby
 	// Without bin/rails, the rails command acts as the app generator, not the app.
 	if r.Gems["railties"] && !f.Has("bin/rails") {
-		return nil, Runtime{}, fmt.Errorf("this is a Rails app but bin/rails is missing; commit the bin/ folder that rails new created")
+		return nil, Runtime{}, errors.New("this is a Rails app but bin/rails is missing; commit the bin/ folder that rails new created")
 	}
 	v, err := rubyVersion(f)
 	if err != nil {
@@ -82,7 +80,7 @@ func planRuby(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			{From: fromStage(buildStage), Src: []string{bundlePath + "/"}, Dst: bundlePath + "/", RootOwned: true, Exclude: gemExcludes},
 			{From: fromStage(buildStage), Src: []string{"/app/"}, Dst: "/app/"},
 		},
-		Env: rubyEnv,
+		Env: slices.Clone(rubyEnv),
 		Cmd: start,
 	}, nil
 }
@@ -110,15 +108,15 @@ func rubyStart(f *Facts) (Cmd, error) {
 	switch {
 	case gems["railties"]:
 		if !gems["puma"] {
-			return nil, fmt.Errorf("this is a Rails app but no server is in its Gemfile; add puma")
+			return nil, errors.New("this is a Rails app but no server is in its Gemfile; add puma")
 		}
 		// config/puma.rb from rails new reads PORT, and rails server binds to 0.0.0.0 in production.
 		return Cmd{"bin/rails", "server"}, nil
 	case f.Has("config.ru"):
 		if !gems["puma"] {
-			return nil, fmt.Errorf("this is a Rack app but no server is in its Gemfile; add puma")
+			return nil, errors.New("this is a Rack app but no server is in its Gemfile; add puma")
 		}
 		return Cmd{"ruby", "-e", pumaWithPort}, nil
 	}
-	return nil, fmt.Errorf("no start command: add a config.ru, or a Procfile with a web: line")
+	return nil, errors.New("no start command: add a config.ru, or a Procfile with a web: line")
 }

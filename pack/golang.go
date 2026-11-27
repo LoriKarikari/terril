@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	goversion "go/version"
 	"path"
@@ -13,13 +14,8 @@ import (
 var goProvider = provider{
 	name:     "go",
 	manifest: "go.mod",
-	detect: func(f *Facts) Role {
-		if f.Go == nil {
-			return 0
-		}
-		return Primary
-	},
-	plan: planGo,
+	detect:   func(f *Facts) Role { return primaryIf(f.Go != nil) },
+	plan:     planGo,
 }
 
 // pin: datasource=docker depName=golang
@@ -92,7 +88,7 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 func goMainPackage(mains []string) (string, error) {
 	switch len(mains) {
 	case 0:
-		return "", fmt.Errorf("no main package: add main.go or cmd/<name>/main.go")
+		return "", errors.New("no main package: add main.go or cmd/<name>/main.go")
 	case 1:
 		return mains[0], nil
 	}

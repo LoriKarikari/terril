@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -8,14 +9,9 @@ import (
 var pythonProvider = provider{
 	name:     "python",
 	manifest: "requirements.txt or pyproject.toml",
-	detect: func(f *Facts) Role {
-		if f.Python == nil {
-			return 0
-		}
-		return Primary
-	},
-	plan:    planPython,
-	runtime: &runtime{versions: &pythonVersions, version: pythonVersion},
+	detect:   func(f *Facts) Role { return primaryIf(f.Python != nil) },
+	plan:     planPython,
+	runtime:  &runtime{versions: &pythonVersions, version: pythonVersion},
 }
 
 const venv = "/app/.venv"
@@ -227,7 +223,7 @@ func pythonStart(py *Python) (Cmd, error) {
 	if len(py.Entries) > 0 {
 		return Cmd{"python", py.Entries[0]}, nil
 	}
-	return nil, fmt.Errorf("no start command: add a main.py, or a Procfile with a web: line")
+	return nil, errors.New("no start command: add a main.py, or a Procfile with a web: line")
 }
 
 func djangoWSGI(py *Python) string {
