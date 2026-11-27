@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/bmatcuk/doublestar/v4"
 	"golang.org/x/mod/modfile"
 	"gopkg.in/yaml.v3"
 )
@@ -312,7 +313,7 @@ func findWorkspace(dir string) (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	for parent := filepath.Dir(app); ; parent = filepath.Dir(parent) {
+	for _, parent := range parentsInRepo(app) {
 		patterns, err := workspacePatterns(parent)
 		if err != nil {
 			return nil, err
@@ -328,10 +329,28 @@ func findWorkspace(dir string) (*Workspace, error) {
 			slices.Sort(dirs)
 			return &Workspace{Root: parent, App: rel, Members: members, Dirs: dirs}, err
 		}
-		if fileExists(filepath.Join(parent, ".git")) || parent == filepath.Dir(parent) {
-			return nil, nil
+	}
+	return nil, nil
+}
+
+// parentsInRepo lists the folders above app up to the root of its git repository. An app that is
+// itself a repository root has none.
+func parentsInRepo(app string) []string {
+	var dirs []string
+	for dir := app; !fileExists(filepath.Join(dir, ".git")) && dir != filepath.Dir(dir); {
+		dir = filepath.Dir(dir)
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+func validPatterns(file string, patterns []string) error {
+	for _, p := range patterns {
+		if !doublestar.ValidatePattern(strings.TrimPrefix(p, "!")) {
+			return fmt.Errorf("%s: %q isn't a valid folder pattern", file, p)
 		}
 	}
+	return nil
 }
 
 func workspacePatterns(dir string) ([]string, error) {
@@ -342,7 +361,7 @@ func workspacePatterns(dir string) ([]string, error) {
 		if err := yaml.Unmarshal(b, &ws); err != nil {
 			return nil, fmt.Errorf("%s: %w", filepath.Join(dir, "pnpm-workspace.yaml"), err)
 		}
-		return ws.Packages, nil
+		return ws.Packages, validPatterns(filepath.Join(dir, "pnpm-workspace.yaml"), ws.Packages)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
@@ -367,16 +386,19 @@ func workspacePatterns(dir string) ([]string, error) {
 		}
 		patterns = yarnClassic.Packages
 	}
-	return patterns, nil
+	return patterns, validPatterns(filepath.Join(dir, "package.json"), patterns)
 }
 
+// A later pattern wins, so a pnpm "!" pattern takes back a folder an earlier one listed.
 func inWorkspace(patterns []string, rel string) bool {
+	in := false
 	for _, p := range patterns {
-		if ok, _ := path.Match(p, rel); ok || strings.HasSuffix(p, "/**") && strings.HasPrefix(rel, strings.TrimSuffix(p, "**")) {
-			return true
+		p, exclude := strings.CutPrefix(p, "!")
+		if ok, _ := doublestar.Match(path.Clean(p), rel); ok {
+			in = !exclude
 		}
 	}
-	return false
+	return in
 }
 
 func readMembers(root string, patterns []string) (map[string]Member, error) {
@@ -416,6 +438,13 @@ func readMembers(root string, patterns []string) (map[string]Member, error) {
 			}
 		}
 		slices.Sort(m.Deps)
+		// Nothing can depend on a member without a name, so only the app itself needs one.
+		if pkg.Name == "" {
+			return nil
+		}
+		if other, ok := members[pkg.Name]; ok {
+			return fmt.Errorf("%s and %s are both named %s; workspace tools need one name per member", other.Dir, rel, pkg.Name)
+		}
 		members[pkg.Name] = m
 		return nil
 	})
@@ -543,7 +572,7 @@ func findUvWorkspace(dir string) (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	for parent := filepath.Dir(app); ; parent = filepath.Dir(parent) {
+	for _, parent := range parentsInRepo(app) {
 		if b, err := os.ReadFile(filepath.Join(parent, "pyproject.toml")); err == nil {
 			var doc struct {
 				Tool struct {
@@ -559,6 +588,9 @@ func findUvWorkspace(dir string) (*Workspace, error) {
 				return nil, fmt.Errorf("%s: %w", filepath.Join(parent, "pyproject.toml"), err)
 			}
 			ws := doc.Tool.Uv.Workspace
+			if err := validPatterns(filepath.Join(parent, "pyproject.toml"), slices.Concat(ws.Members, ws.Exclude)); err != nil {
+				return nil, err
+			}
 			rel, _ := filepath.Rel(parent, app)
 			rel = filepath.ToSlash(rel)
 			if inWorkspace(ws.Members, rel) && !inWorkspace(ws.Exclude, rel) {
@@ -566,10 +598,8 @@ func findUvWorkspace(dir string) (*Workspace, error) {
 				return &Workspace{Root: parent, App: rel, Dirs: dirs}, err
 			}
 		}
-		if fileExists(filepath.Join(parent, ".git")) || parent == filepath.Dir(parent) {
-			return nil, nil
-		}
 	}
+	return nil, nil
 }
 
 func uvMemberDirs(root string, members, exclude []string) ([]string, error) {
@@ -809,6 +839,7 @@ type cargoToml struct {
 	} `toml:"package"`
 	Bin []struct {
 		Name string `toml:"name"`
+		Path string `toml:"path"`
 	} `toml:"bin"`
 	Workspace *struct {
 		Members []string `toml:"members"`
@@ -827,13 +858,18 @@ func readRust(f *Facts) (*Rust, error) {
 	if _, err := toml.Decode(root, &manifest); err != nil {
 		return nil, fmt.Errorf("reading Cargo.toml: %w", err)
 	}
+	if manifest.Package != nil && manifest.Package.DefaultRun != "" {
+		return &Rust{Package: manifest.Package.Name, Bin: manifest.Package.DefaultRun, Toolchain: rustToolchain(f)}, nil
+	}
 	dirs := []string{"."}
 	if manifest.Workspace != nil {
 		for _, pattern := range manifest.Workspace.Members {
 			matches, _ := filepath.Glob(filepath.Join(f.Dir, pattern, "Cargo.toml"))
 			for _, m := range matches {
 				rel, _ := filepath.Rel(f.Dir, filepath.Dir(m))
-				dirs = append(dirs, filepath.ToSlash(rel))
+				if rel = filepath.ToSlash(rel); !slices.Contains(dirs, rel) {
+					dirs = append(dirs, rel)
+				}
 			}
 		}
 	}
@@ -854,12 +890,14 @@ func readRust(f *Facts) (*Rust, error) {
 			continue
 		}
 		names := map[string]bool{}
+		mainNamed := false
 		for _, b := range c.Bin {
 			names[b.Name] = true
+			mainNamed = mainNamed || path.Clean(b.Path) == "src/main.rs"
 		}
 		// Cargo finds binaries in src/main.rs and src/bin/ unless autobins is off.
 		if c.Package.Autobins == nil || *c.Package.Autobins {
-			if f.Has(path.Join(dir, "src/main.rs")) {
+			if f.Has(path.Join(dir, "src/main.rs")) && !mainNamed {
 				names[c.Package.Name] = true
 			}
 			entries, _ := os.ReadDir(filepath.Join(f.Dir, dir, "src/bin"))
@@ -870,9 +908,6 @@ func readRust(f *Facts) (*Rust, error) {
 					names[e.Name()] = true
 				}
 			}
-		}
-		if dir == "." && c.Package.DefaultRun != "" {
-			return &Rust{Package: c.Package.Name, Bin: c.Package.DefaultRun, Toolchain: rustToolchain(f)}, nil
 		}
 		for name := range names {
 			bins = append(bins, bin{c.Package.Name, name})
@@ -887,6 +922,14 @@ func readRust(f *Facts) (*Rust, error) {
 	var names []string
 	for _, b := range bins {
 		names = append(names, b.name)
+	}
+	if manifest.Package == nil {
+		names = names[:0]
+		for _, b := range bins {
+			names = append(names, b.pkg+"/"+b.name)
+		}
+		slices.Sort(names)
+		return nil, fmt.Errorf("several Rust binaries (%s); set default-run in the [package] of the one to build", strings.Join(names, ", "))
 	}
 	slices.Sort(names)
 	return nil, fmt.Errorf("several Rust binaries (%s); set default-run in Cargo.toml", strings.Join(names, ", "))

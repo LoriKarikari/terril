@@ -99,6 +99,7 @@ type fixture struct {
 	path        string
 	absent      []string
 	absentFiles []string
+	gitRoot     string
 	excludes    []string
 	buildEnv    []string
 	secrets     []string
@@ -133,6 +134,7 @@ func fixtures(t *testing.T) []fixture {
 		}
 		f.absent = readLines(t, root, "absent")
 		f.absentFiles = readLines(t, root, "absent-files")
+		f.gitRoot, _ = readFile(t, root, "git-root")
 		f.excludes = readLines(t, root, "context-excludes")
 		f.runEnv = readLines(t, root, "run-env")
 		for _, line := range readLines(t, root, "build-env") {
@@ -411,6 +413,11 @@ func copyApp(t *testing.T, f fixture) string {
 	work := t.TempDir()
 	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
 		t.Fatal(err)
+	}
+	if f.gitRoot != "" {
+		if err := os.Mkdir(filepath.Join(work, f.gitRoot, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return filepath.Join(work, strings.TrimPrefix(f.dir, filepath.Join("testdata", f.name)))
 }

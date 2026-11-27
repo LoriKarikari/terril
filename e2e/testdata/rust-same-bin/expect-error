@@ -1,0 +1,1 @@
+several Rust binaries (a/server, b/server); set default-run in the [package] of the one to build
