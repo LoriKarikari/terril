@@ -13,3 +13,4 @@ ts	phase	decision	why	evidence	result
 2026-10-24T09:29:54Z	verify	all 7 examples pass e2e	built, ran and curled each image	e2e/results.tsv	PASS
 2026-10-24T09:29:54Z	verify	the python+node image has no node binary and no node_modules	checked inside the container, not just the size	docker run ... command -v node	PASS
 2026-10-24T09:32:32Z	harness	dropped the throwaway DOCKER_CONFIG from e2e/run.sh	the user runs native docker; removed the stale desktop.exe credsStore from ~/.docker/config.json instead	e2e/results.tsv rerun	PASS, supersedes the earlier workaround row
+2026-11-27T15:10:47Z	ship	checks run before the push to main, not on GitHub, and a release is a tag the maintainer pushes	same as wolk D-092: the maintainer ships from an agent straight to main, so e2e.yml ran the checks a second time, and release-please needed pull requests	justfile, AGENTS.md Shipping	done

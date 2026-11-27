@@ -1,5 +1,7 @@
 # Changelog
 
+Releases after 0.2.0 list their changes on the [releases page](https://github.com/LoriKarikari/terril/releases).
+
 ## [0.2.0](https://github.com/LoriKarikari/terril/compare/v0.1.0...v0.2.0) (2026-11-01)
 
 

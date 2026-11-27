@@ -26,5 +26,21 @@ fmt:
 lint:
     {{golangci}} run ./...
     {{govulncheck}} ./...
-    # A rule in the root .gitignore must not drop test app files; CI only sees committed ones.
+    # A rule in the root .gitignore must not drop test app files; a clone only sees committed ones.
     test -z "$(git ls-files --others --ignored --exclude-standard e2e/testdata | git check-ignore -v --stdin | grep '^.gitignore:' | grep -v node_modules)"
+
+# Checks that every commit in the range follows the commit message rules in CONTRIBUTING.md.
+commits range="origin/main..HEAD":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pattern='^((feat|fix|docs|test|refactor|perf|build|ci|chore)(\([a-z0-9-]+\))?!?: [a-z0-9`].*[^.]|Revert ".+")$'
+    log=$(git log --no-merges --format='%H%x09%s' "{{range}}")
+    bad=0
+    while IFS=$'\t' read -r sha subject; do
+        [[ -n "$sha" ]] || continue
+        if ! [[ "$subject" =~ $pattern ]]; then
+            echo "not a conventional commit: ${sha:0:7} $subject" >&2
+            bad=1
+        fi
+    done <<<"$log"
+    exit "$bad"

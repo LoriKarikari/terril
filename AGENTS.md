@@ -16,7 +16,14 @@ terril is an open-source CLI that builds a container image from a Node, Python, 
 - `just build` builds `bin/terril`.
 - `just test` runs the end-to-end tests in `e2e/e2e_test.go`. `just test python-flask` runs one app.
 - `just cache` checks that a source edit doesn't rerun the dependency install.
-- `just lint` runs golangci-lint (with gofmt and goimports) and govulncheck, the same checks CI runs. `just fmt` formats the code.
+- `just lint` runs golangci-lint (with gofmt and goimports) and govulncheck. `just fmt` formats the code.
+- `just commits` checks that commits since `origin/main` follow the commit message rules in `CONTRIBUTING.md`.
+
+## Shipping
+
+The maintainer pushes straight to `main` after `just commits`, `just lint`, `just test` and `just cache` pass on the commits rebased onto `origin/main`. No workflow runs them on GitHub. A release is a `v*` tag the maintainer pushes. GoReleaser then builds the archives and writes the release notes from the `feat`, `fix` and `perf` commits since the last tag.
+
+Everyone else, agents included, opens a pull request by following `AI_CONTRIBUTING.md`.
 
 ## Rules
 

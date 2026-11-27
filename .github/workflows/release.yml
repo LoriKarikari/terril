@@ -1,48 +1,15 @@
 name: release
-
 on:
   push:
-    branches: [main]
-
+    tags: ['v*']
 permissions:
   contents: write
-  pull-requests: write
-  actions: write
-
 jobs:
-  release-please:
-    runs-on: ubuntu-latest
-    outputs:
-      created: ${{ steps.release.outputs.release_created }}
-      tag: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - id: release
-        uses: googleapis/release-please-action@v5
-      # CI on a pull request opened by github-actions waits for approval, and main requires it.
-      - if: steps.release.outputs.prs_created == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ steps.release.outputs.pr }}
-        run: |
-          branch=$(jq -r .headBranchName <<<"$PR")
-          ids=""
-          for _ in $(seq 1 12); do
-            ids=$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$branch" --event pull_request --status action_required --json databaseId -q '.[].databaseId')
-            [ -n "$ids" ] && break
-            sleep 5
-          done
-          for id in $ids; do
-            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve"
-          done
-
   goreleaser:
-    needs: release-please
-    if: needs.release-please.outputs.created == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ needs.release-please.outputs.tag }}
           fetch-depth: 0
       - uses: actions/setup-go@v6
         with:

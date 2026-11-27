@@ -29,11 +29,11 @@ Thanks for wanting to help. This page says which changes terril accepts and how 
 3. Keep the change focused on one thing. Unrelated cleanups go in their own pull request.
 4. Prove it end to end with a test app. See the testing section below.
 5. Update `README.md` if behavior changes.
-6. Run `just lint` and `just test`. Install [just](https://github.com/casey/just) first if you don't have it. Both must pass.
+6. Run `just lint`, `just test` and `just cache`. Install [just](https://github.com/casey/just) first if you don't have it. All three must pass.
 7. Write commit messages and the pull request title as [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 8. Describe what the change does, what it doesn't do, and how you checked it.
 
-`main` only accepts squash merges, and the `e2e` check must pass. The pull request title becomes the commit on `main`.
+No checks run on GitHub. The maintainer runs `just lint`, `just test` and `just cache` on your branch before merging it. `main` only accepts squash merges, and the pull request title becomes the commit on `main`.
 
 ### Commit messages
 
@@ -87,11 +87,11 @@ Before each build, the test adds a `node_modules` and a `__pycache__` folder to 
 
 Commit lockfiles, and leave out `node_modules`, `.venv` and build output.
 
-`just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. It builds one app at a time, because parallel builds that share steps can miss Docker's cache. CI runs it on every pull request that changes code.
+`just cache` builds each app, adds a source file, and rebuilds. It fails if the rebuild reruns the dependency install, and writes the rebuild time to `e2e/cache.tsv`. It builds one app at a time, because parallel builds that share steps can miss Docker's cache.
 
 ## Releases
 
-[release-please](https://github.com/googleapis/release-please) keeps a release pull request open on `main`. Every merged `feat:`, `fix:` or `perf:` pull request adds to its `CHANGELOG.md` and bumps the version it proposes. Before 1.0, `feat:` bumps the minor version and `fix:` the patch version. CI on a pull request that Actions opens waits for approval, so the release workflow approves it. Merging the release pull request tags the release, and GoReleaser then builds `terril` for Linux and macOS on amd64 and arm64 and attaches the archives and `checksums.txt` to it.
+The maintainer releases by pushing a `v*` tag on `main`. Before 1.0, a release with a `feat:` commit bumps the minor version, and one with only fixes bumps the patch version. GoReleaser then builds `terril` for Linux and macOS on amd64 and arm64, attaches the archives and `checksums.txt` to the release, and writes its notes from the `feat:`, `fix:` and `perf:` commits since the last tag.
 
 ## Using AI tools
 
