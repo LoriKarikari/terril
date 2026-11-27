@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/http"
 	"os"
@@ -119,26 +120,30 @@ func fixtures(t *testing.T) []fixture {
 		}
 		root := filepath.Join("testdata", e.Name())
 		f := fixture{name: e.Name(), dir: root, path: "/"}
-		if app, ok := readFile(root, "app"); ok {
+		if app, ok := readFile(t, root, "app"); ok {
 			f.dir = filepath.Join(root, app)
 		}
-		f.expect, _ = readFile(root, "expect")
-		f.expectError, _ = readFile(root, "expect-error")
-		f.warning, _ = readFile(root, "expect-warning")
-		f.today, _ = readFile(root, "today")
-		if p, ok := readFile(root, "path"); ok {
+		f.expect, _ = readFile(t, root, "expect")
+		f.expectError, _ = readFile(t, root, "expect-error")
+		f.warning, _ = readFile(t, root, "expect-warning")
+		f.today, _ = readFile(t, root, "today")
+		if p, ok := readFile(t, root, "path"); ok {
 			f.path = p
 		}
-		f.absent = readLines(root, "absent")
-		f.excludes = readLines(root, "context-excludes")
-		f.runEnv = readLines(root, "run-env")
-		for _, line := range readLines(root, "build-env") {
+		f.absent = readLines(t, root, "absent")
+		f.excludes = readLines(t, root, "context-excludes")
+		f.runEnv = readLines(t, root, "run-env")
+		for _, line := range readLines(t, root, "build-env") {
 			kv, secret := strings.CutPrefix(line, "secret ")
-			f.buildEnv = append(f.buildEnv, kv)
-			if secret {
-				_, v, _ := strings.Cut(kv, "=")
+			if _, v, ok := strings.Cut(kv, "="); !ok || len(v) < 8 {
+				t.Fatalf("%s/build-env: %q needs a value of 8 characters or more, so the leak check can't match noise", root, kv)
+			} else if secret {
 				f.secrets = append(f.secrets, v)
 			}
+			f.buildEnv = append(f.buildEnv, kv)
+		}
+		if f.expect == "" && f.expectError == "" {
+			t.Fatalf("%s has no expect or expect-error file", root)
 		}
 		fs = append(fs, f)
 	}
@@ -149,17 +154,27 @@ func fixtures(t *testing.T) []fixture {
 }
 
 // Some apps have an app/ folder, not an app file.
-func readFile(dir, name string) (string, bool) {
+func readFile(t *testing.T, dir, name string) (string, bool) {
 	p := filepath.Join(dir, name)
-	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+	st, err := os.Stat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Mode().IsRegular() {
 		return "", false
 	}
 	b, err := os.ReadFile(p)
-	return strings.TrimSpace(string(b)), err == nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b)), true
 }
 
-func readLines(dir, name string) []string {
-	s, _ := readFile(dir, name)
+func readLines(t *testing.T, dir, name string) []string {
+	s, _ := readFile(t, dir, name)
 	var lines []string
 	for _, l := range strings.Split(s, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
@@ -233,8 +248,9 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		return
 	}
 
+	dir := copyApp(t, f)
 	if f.excludes != nil {
-		facts, err := pack.Read(f.dir)
+		facts, err := pack.Read(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +264,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		}
 	}
 
-	plantHostArtifacts(t, f.dir)
+	plantHostArtifacts(t, dir)
 	if len(f.buildEnv) > 0 {
 		// A build with other values first makes a cached build fail the test.
 		var stale []string
@@ -256,7 +272,7 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 			k, _, _ := strings.Cut(kv, "=")
 			stale = append(stale, "--env", k+"=stale-"+k)
 		}
-		if _, err := f.run(log, append(append([]string{"build"}, stale...), "-t", image, f.dir)...); err != nil {
+		if _, err := f.run(log, append(append([]string{"build"}, stale...), "-t", image, dir)...); err != nil {
 			r.fail(t, "build failed, see %s", log.Name())
 			return
 		}
@@ -265,9 +281,13 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	for _, kv := range f.buildEnv {
 		args = append(args, "--env", kv)
 	}
-	out, err := f.run(log, append(args, "-t", image, f.dir)...)
+	out, err := f.run(log, append(args, "-t", image, dir)...)
 	if err != nil {
 		r.fail(t, "build failed, see %s", log.Name())
+		return
+	}
+	if f.warning == "" && strings.Contains(out, "terril: warning:") {
+		r.fail(t, "the build warned, and the app has no expect-warning file, see %s", log.Name())
 		return
 	}
 	if !strings.Contains(out, f.warning) {
@@ -307,20 +327,20 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		return
 	}
 
-	plan, err := f.terril(context.Background(), "plan", f.dir).Output()
+	plan, err := output(f.terril(context.Background(), "plan", dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m := summaryRe.FindSubmatch(plan); m != nil {
 		r.provider = string(m[1])
 	}
-	user, err := exec.Command("docker", "image", "inspect", "-f", "{{.Config.User}}", image).Output()
+	user, err := output(exec.Command("docker", "image", "inspect", "-f", "{{.Config.User}}", image))
 	if err != nil {
 		t.Fatal(err)
 	}
 	r.user = strings.TrimSpace(string(user))
-	if uid, _, _ := strings.Cut(r.user, ":"); uid == "" || uid == "0" || uid == "root" {
-		r.fail(t, "image runs as root")
+	if uid, _, _ := strings.Cut(r.user, ":"); uid != "1000" {
+		r.fail(t, "image runs as %q, not UID 1000", r.user)
 		return
 	}
 
@@ -340,20 +360,32 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 }
 
 func plantHostArtifacts(t *testing.T, dir string) {
-	root := filepath.Join(dir, "host-artifacts")
-	for _, d := range []string{"node_modules", "__pycache__"} {
-		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(root, d, "HOST_MARKER"), nil, 0o644); err != nil {
-			t.Fatal(err)
+	for _, parent := range []string{dir, filepath.Join(dir, "host-artifacts")} {
+		for _, d := range []string{"node_modules", "__pycache__"} {
+			if err := os.MkdirAll(filepath.Join(parent, d), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(parent, d, "HOST_MARKER"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(root); err != nil {
-			t.Error(err)
-		}
-	})
+}
+
+func copyApp(t *testing.T, f fixture) string {
+	work := t.TempDir()
+	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(work, strings.TrimPrefix(f.dir, filepath.Join("testdata", f.name)))
+}
+
+func output(cmd *exec.Cmd) ([]byte, error) {
+	out, err := cmd.Output()
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+		return out, fmt.Errorf("%s: %w: %s", strings.Join(cmd.Args, " "), err, bytes.TrimSpace(exit.Stderr))
+	}
+	return out, err
 }
 
 type rootfs struct {
@@ -364,7 +396,7 @@ type rootfs struct {
 
 func exportImage(t *testing.T, image string, secrets []string) (rootfs, error) {
 	var fs rootfs
-	id, err := exec.Command("docker", "create", image).Output()
+	id, err := output(exec.Command("docker", "create", image))
 	if err != nil {
 		return fs, err
 	}
@@ -378,6 +410,13 @@ func exportImage(t *testing.T, image string, secrets []string) (rootfs, error) {
 	if err := cmd.Start(); err != nil {
 		return fs, err
 	}
+	waited := false
+	defer func() {
+		if !waited {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
 	counter := &countingReader{r: out}
 	tr := tar.NewReader(counter)
 	for {
@@ -405,6 +444,7 @@ func exportImage(t *testing.T, image string, secrets []string) (rootfs, error) {
 		return fs, err
 	}
 	fs.size = counter.n
+	waited = true
 	return fs, cmd.Wait()
 }
 
@@ -470,11 +510,11 @@ func shippedPackages(files, absent []string) []string {
 }
 
 func leakedValues(t *testing.T, image string, f fixture, secretsFound []string) []string {
-	history, err := exec.Command("docker", "history", "--no-trunc", image).Output()
+	history, err := output(exec.Command("docker", "history", "--no-trunc", image))
 	if err != nil {
 		t.Fatal(err)
 	}
-	inspect, err := exec.Command("docker", "image", "inspect", image).Output()
+	inspect, err := output(exec.Command("docker", "image", "inspect", image))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +536,7 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 	for _, kv := range f.runEnv {
 		args = append(args, "-e", kv)
 	}
-	id, err := exec.Command("docker", append(args, "-p", "127.0.0.1::8080", image)...).Output()
+	id, err := output(exec.Command("docker", append(args, "-p", "127.0.0.1::8080", image)...))
 	if err != nil {
 		return "", err
 	}
@@ -508,27 +548,40 @@ func serve(t *testing.T, image string, f fixture, log *os.File) (string, error) 
 		}
 		docker(t, "rm", "-f", cid)
 	}()
-	port, err := exec.Command("docker", "port", cid, "8080").Output()
+	port, err := output(exec.Command("docker", "port", cid, "8080"))
 	if err != nil {
 		return "", err
 	}
 	addr := strings.SplitN(strings.TrimSpace(string(port)), "\n", 2)[0]
 	client := &http.Client{Timeout: 2 * time.Second}
-	var body string
+	var body, last string
 	for range 30 {
-		if res, err := client.Get("http://" + addr + f.path); err == nil {
-			b, _ := io.ReadAll(res.Body)
-			_ = res.Body.Close()
-			if res.StatusCode < 400 {
-				body = string(b)
-				if strings.Contains(body, f.expect) {
-					break
-				}
+		res, err := client.Get("http://" + addr + f.path)
+		if err != nil {
+			last = err.Error()
+			time.Sleep(time.Second)
+			continue
+		}
+		b, err := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		switch {
+		case err != nil:
+			last = err.Error()
+		case res.StatusCode >= 400:
+			last = res.Status
+		default:
+			body = string(b)
+			if strings.Contains(body, f.expect) {
+				return body, nil
 			}
+			last = "200 without the expected text"
 		}
 		time.Sleep(time.Second)
 	}
-	return body, nil
+	if body != "" {
+		return body, nil
+	}
+	return "", fmt.Errorf("the app didn't answer %s within 30 seconds; last try: %s", f.path, last)
 }
 
 func TestCache(t *testing.T) {
@@ -563,27 +616,17 @@ func testCache(t *testing.T, f fixture) {
 	}()
 	image := "terril-cache-" + f.name
 	keepUntilEnd(image)
-	work := t.TempDir()
-	if err := os.CopyFS(work, os.DirFS(filepath.Join("testdata", f.name))); err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(work, strings.TrimPrefix(f.dir, filepath.Join("testdata", f.name)))
+	dir := copyApp(t, f)
 	log := newLog(t, f.name+".cache.log")
 	if _, err := f.run(log, "build", "-t", image, dir); err != nil {
 		t.Fatalf("first build failed, see %s", log.Name())
 	}
-	plan, err := f.terril(context.Background(), "plan", f.dir).Output()
+	row[4] = "terril plan failed"
+	plan, err := output(f.terril(context.Background(), "plan", dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := ""
-	for _, line := range strings.Split(string(plan), "\n") {
-		cmd, ok := strings.CutPrefix(line, "RUN ")
-		if cmd = mountsRe.ReplaceAllString(cmd, ""); ok && installRe.MatchString(cmd) && !notInstallRe.MatchString(cmd) {
-			first = cmd
-			break
-		}
-	}
+	installs := installSteps(string(plan))
 
 	// A fully cached build never touches the steps before a stage's last one, so a size-limited
 	// prune can drop them. If the install reran, a second rebuild shows whether the Dockerfile
@@ -608,15 +651,36 @@ func testCache(t *testing.T, f fixture) {
 			t.Fatalf("rebuild failed, see %s", log.Name())
 		}
 		rerun = rerunSteps(out)
-		if first == "" || !slices.Contains(rerun, first) {
+		if !slices.ContainsFunc(installs, func(s string) bool { return slices.Contains(rerun, s) }) {
 			break
 		}
 	}
 	row = []string{f.name, "PASS", fmt.Sprintf("%.1f", secs), fmt.Sprint(len(rerun)), "-"}
-	if first != "" && slices.Contains(rerun, first) {
-		row[1], row[4] = "FAIL", first
-		t.Errorf("a source edit reran the dependency install: %s", first)
+	for _, s := range installs {
+		if slices.Contains(rerun, s) {
+			row[1], row[4] = "FAIL", s
+			t.Errorf("a source edit reran the dependency install: %s", s)
+		}
 	}
+}
+
+// An install after a stage copies the source builds the app, so a source edit reruns it.
+func installSteps(plan string) []string {
+	var installs []string
+	source := false
+	for _, line := range strings.Split(plan, "\n") {
+		switch {
+		case strings.HasPrefix(line, "FROM "):
+			source = false
+		case strings.HasPrefix(line, "COPY ") && !strings.Contains(line, "--from=") && strings.HasSuffix(line, " . ./"):
+			source = true
+		case !source && strings.HasPrefix(line, "RUN "):
+			if cmd := mountsRe.ReplaceAllString(strings.TrimPrefix(line, "RUN "), ""); installRe.MatchString(cmd) && !notInstallRe.MatchString(cmd) {
+				installs = append(installs, cmd)
+			}
+		}
+	}
+	return installs
 }
 
 func newLog(t *testing.T, name string) *os.File {

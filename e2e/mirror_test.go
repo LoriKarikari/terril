@@ -22,16 +22,26 @@ var (
 
 // Built one at a time, because ECR Public allows one anonymous pull per second.
 func TestAppsFromOfficialImagesMirror(t *testing.T) {
-	out, err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Output()
+	out, err := output(exec.Command("docker", "version", "--format", "{{.Server.Version}}"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	major, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
-	n, _ := strconv.Atoi(major)
+	n, err := strconv.Atoi(major)
+	if err != nil {
+		t.Fatalf("docker version %q: %v", out, err)
+	}
 	noSyntax := n >= 29
 	t.Logf("Docker %s, NoSyntax %v", strings.TrimSpace(string(out)), noSyntax)
-	for _, f := range fixtures(t) {
-		if !slices.Contains([]string{"node-http", "python-uv", "php-laravel"}, f.name) {
+	names := []string{"node-http", "python-uv", "php-laravel"}
+	all := fixtures(t)
+	for _, name := range names {
+		if *apps == "" && !slices.ContainsFunc(all, func(f fixture) bool { return f.name == name }) {
+			t.Fatalf("the mirror test builds %s, and e2e/testdata has no such app", name)
+		}
+	}
+	for _, f := range all {
+		if !slices.Contains(names, f.name) {
 			continue
 		}
 		t.Run(f.name, func(t *testing.T) {
