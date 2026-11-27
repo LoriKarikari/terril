@@ -33,7 +33,7 @@ environment. -t defaults to the directory name.
 `
 
 // Release builds set version with -ldflags.
-var version = ""
+var version string
 
 func versionString() string {
 	if version != "" {
@@ -110,30 +110,14 @@ func usageError(msg string) int {
 }
 
 func run(cmd, dir, provider, tag string, env *envFlags) error {
-	facts, err := pack.Read(dir)
+	plan, err := makePlan(dir, provider, env)
 	if err != nil {
 		return err
 	}
-	// Tests set the date to check end-of-life warnings and refusals without waiting for them.
-	if today := os.Getenv("TERRIL_TODAY"); today != "" {
-		if facts.Today, err = time.Parse(time.DateOnly, today); err != nil {
-			return fmt.Errorf("TERRIL_TODAY: %w", err)
-		}
-	}
-	plan, err := pack.New(facts, provider)
-	if err != nil {
-		return err
-	}
-	for _, w := range plan.Warnings {
-		fmt.Fprintln(os.Stderr, "terril: warning:", w.Message)
-	}
-	plan.BuildEnv = env.names
-	dockerfile := plan.Dockerfile()
 	if cmd == "plan" {
-		fmt.Print(dockerfile)
+		fmt.Print(plan.Dockerfile())
 		return nil
 	}
-
 	if err := env.check(); err != nil {
 		return err
 	}
@@ -142,6 +126,32 @@ func run(cmd, dir, provider, tag string, env *envFlags) error {
 			return err
 		}
 	}
+	return build(plan, tag, env)
+}
+
+func makePlan(dir, provider string, env *envFlags) (*pack.Plan, error) {
+	facts, err := pack.Read(dir)
+	if err != nil {
+		return nil, err
+	}
+	// Tests set the date to check end-of-life warnings and refusals without waiting for them.
+	if today := os.Getenv("TERRIL_TODAY"); today != "" {
+		if facts.Today, err = time.Parse(time.DateOnly, today); err != nil {
+			return nil, fmt.Errorf("TERRIL_TODAY: %w", err)
+		}
+	}
+	plan, err := pack.New(facts, provider)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range plan.Warnings {
+		fmt.Fprintln(os.Stderr, "terril: warning:", w.Message)
+	}
+	plan.BuildEnv = env.names
+	return plan, nil
+}
+
+func build(plan *pack.Plan, tag string, env *envFlags) error {
 	fmt.Fprintf(os.Stderr, "terril: building %s as %s\n", plan.Summary(), tag)
 	args := []string{"build", "-t", tag, "-f", "-"}
 	dockerEnv := os.Environ()
@@ -159,7 +169,7 @@ func run(cmd, dir, provider, tag string, env *envFlags) error {
 	}
 	docker := exec.Command("docker", append(args, plan.Context)...)
 	docker.Env = dockerEnv
-	docker.Stdin = strings.NewReader(dockerfile)
+	docker.Stdin = strings.NewReader(plan.Dockerfile())
 	docker.Stdout, docker.Stderr = os.Stdout, os.Stderr
 	return docker.Run()
 }

@@ -562,7 +562,7 @@ func countOutput(name string, args ...string) (int64, error) {
 	return n, cmd.Wait()
 }
 
-func mb(bytes int64) string { return fmt.Sprintf("%.1f", float64(bytes)/1e6) }
+func mb(n int64) string { return fmt.Sprintf("%.1f", float64(n)/1e6) }
 
 func dive(t *testing.T, image string) (float64, float64, error) {
 	report := filepath.Join(t.TempDir(), "dive.json")

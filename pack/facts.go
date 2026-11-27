@@ -36,11 +36,8 @@ type Facts struct {
 	PHP         *PHP
 	DotNet      *DotNet
 	Rust        *Rust
-	Go          *modfile.File
-	GoCgo       bool
-	// "." when main.go is at the root, otherwise ./cmd/<name> for each cmd/<name>/main.go.
-	GoMains []string
-	Config  Config
+	Go          *Go
+	Config      Config
 	// From terril.toml, else the Procfile web: line.
 	Start string
 	// Why a provider can't build this app, keyed by provider name. Only the provider that builds
@@ -168,13 +165,7 @@ func (f *Facts) readAll() error {
 		}
 	}
 	if s, ok := f.read("go.mod"); ok {
-		if f.Go, err = modfile.Parse("go.mod", []byte(s), nil); err != nil {
-			return err
-		}
-		if f.GoCgo, err = goUsesCgo(f); err != nil {
-			return err
-		}
-		if f.GoMains, err = goMains(f); err != nil {
+		if f.Go, err = readGo(f, s); err != nil {
 			return err
 		}
 	}
@@ -190,6 +181,16 @@ func (f *Facts) readAll() error {
 		f.Start = f.Config.Start
 	}
 	return nil
+}
+
+type Go struct {
+	// The go and toolchain lines of go.mod, when it has them, such as "1.24" and "go1.25.1".
+	Version, Toolchain string
+	// The module has a replace with a local folder, which go mod download needs first.
+	LocalReplace bool
+	Cgo          bool
+	// "." when main.go is at the root, otherwise ./cmd/<name> for each cmd/<name>/main.go.
+	Mains []string
 }
 
 type NodeManager string
@@ -1145,15 +1146,34 @@ var cgoModules = []string{
 	"github.com/confluentinc/confluent-kafka-go/v2",
 }
 
-func goUsesCgo(f *Facts) (bool, error) {
-	for _, r := range f.Go.Require {
+func readGo(f *Facts, gomod string) (*Go, error) {
+	m, err := modfile.Parse("go.mod", []byte(gomod), nil)
+	if err != nil {
+		return nil, err
+	}
+	g := &Go{LocalReplace: slices.ContainsFunc(m.Replace, func(r *modfile.Replace) bool { return modfile.IsDirectoryPath(r.New.Path) })}
+	if m.Go != nil {
+		g.Version = m.Go.Version
+	}
+	if m.Toolchain != nil {
+		g.Toolchain = m.Toolchain.Name
+	}
+	if g.Cgo, err = goUsesCgo(f, m); err != nil {
+		return nil, err
+	}
+	g.Mains, err = goMains(f)
+	return g, err
+}
+
+func goUsesCgo(f *Facts, m *modfile.File) (bool, error) {
+	for _, r := range m.Require {
 		if slices.Contains(cgoModules, r.Mod.Path) {
 			return true, nil
 		}
 	}
 	found := false
 	err := filepath.WalkDir(f.Dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || found {
+		if err != nil {
 			return err
 		}
 		if d.IsDir() {
@@ -1170,7 +1190,9 @@ func goUsesCgo(f *Facts) (bool, error) {
 		if err != nil {
 			return err
 		}
-		found = slices.ContainsFunc(file.Imports, func(i *ast.ImportSpec) bool { return i.Path.Value == `"C"` })
+		if found = slices.ContainsFunc(file.Imports, func(i *ast.ImportSpec) bool { return i.Path.Value == `"C"` }); found {
+			return filepath.SkipAll
+		}
 		return nil
 	})
 	return found, err

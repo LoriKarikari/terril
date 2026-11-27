@@ -5,10 +5,7 @@ import (
 	"fmt"
 	goversion "go/version"
 	"path"
-	"slices"
 	"strings"
-
-	"golang.org/x/mod/modfile"
 )
 
 var goProvider = provider{
@@ -23,14 +20,14 @@ const goVersion = "1.27"
 
 // The go and toolchain lines in go.mod are minimums, and a newer Go builds older code the same
 // way, so terril builds with its own Go unless go.mod asks for a newer one.
-func goImageVersion(m *modfile.File) string {
+func goImageVersion(g *Go) string {
 	v := "go" + goVersion
 	var wants []string
-	if m.Go != nil {
-		wants = append(wants, "go"+m.Go.Version)
+	if g.Version != "" {
+		wants = append(wants, "go"+g.Version)
 	}
-	if m.Toolchain != nil {
-		wants = append(wants, m.Toolchain.Name)
+	if g.Toolchain != "" {
+		wants = append(wants, g.Toolchain)
 	}
 	for _, want := range wants {
 		if lang := goversion.Lang(want); goversion.Compare(lang, v) > 0 {
@@ -42,7 +39,7 @@ func goImageVersion(m *modfile.File) string {
 
 func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	version := goImageVersion(f.Go)
-	pkg, err := goMainPackage(f.GoMains)
+	pkg, err := goMainPackage(f.Go.Mains)
 	if err != nil {
 		return nil, Runtime{}, err
 	}
@@ -55,7 +52,7 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	goCaches := caches("/go/pkg/mod", "/root/.cache/go-build")
 	steps := []Step{Copy{Src: mods, Dst: "./"}, download, copySource()}
 	// A replace with a local path needs that folder before modules can download.
-	if slices.ContainsFunc(f.Go.Replace, func(r *modfile.Replace) bool { return modfile.IsDirectoryPath(r.New.Path) }) {
+	if f.Go.LocalReplace {
 		steps = []Step{copySource(), download}
 	}
 	steps = append(steps, copyAssets(assets)...)
@@ -63,7 +60,7 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	image := "golang:" + version
 	base := "gcr.io/distroless/static-debian13"
 	cgo := "0"
-	if f.GoCgo {
+	if f.Go.Cgo {
 		// Trixie on both sides, so the binary links against the same glibc it runs with.
 		image, base, cgo = image+"-trixie", "gcr.io/distroless/cc-debian13", "1"
 	} else {
