@@ -111,6 +111,11 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 		}
 	}
 	plan.Runtime.Packages = f.Config.Packages
+	// Distroless, python and ruby images ship CA certificates, and the trixie-slim images of
+	// Debian and Node don't, so a start command or a package must not cost the app its TLS calls.
+	if strings.HasSuffix(plan.Runtime.From, "trixie-slim") && !slices.Contains(plan.Runtime.Packages, "ca-certificates") {
+		plan.Runtime.Packages = append([]string{"ca-certificates"}, plan.Runtime.Packages...)
+	}
 	return plan, nil
 }
 

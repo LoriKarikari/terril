@@ -65,7 +65,7 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	steps = append(steps, copyAssets(assets)...)
 
 	image := "golang:" + version
-	base := "gcr.io/distroless/static-debian12"
+	base := "gcr.io/distroless/static-debian13"
 	cgo := "0"
 	if f.GoCgo {
 		// Trixie on both sides, so the binary links against the same glibc it runs with.

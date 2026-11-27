@@ -237,7 +237,8 @@ func (r Runtime) stage() Stage {
 	if len(r.Packages) > 0 {
 		steps = append(steps, aptInstall(r.Packages))
 	}
-	steps = append(steps, Env{"PORT", "8080"})
+	// UID 1000 has no passwd entry, so HOME would be /, which the app can't write.
+	steps = append(steps, Env{"PORT", "8080"}, Env{"HOME", "/tmp"})
 	for _, e := range r.Env {
 		steps = append(steps, e)
 	}

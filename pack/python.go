@@ -107,6 +107,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 				Copy{Src: []string{"pyproject.toml", "uv.lock"}, Dst: "./"},
 				Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: uvCache},
 				copySource(),
+				Run{Cmd: "uv sync --frozen --no-dev", Caches: uvCache},
 			)
 		}
 	case "pip":
@@ -150,7 +151,7 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	rt := Runtime{
 		From:   runtimeImage,
 		Copies: []Copy{{From: "build", Src: []string{"/app/"}, Dst: "/app/"}},
-		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}, {"HOME", "/tmp"}},
+		Env:    []Env{venvPath, {"PYTHONUNBUFFERED", "1"}},
 		Cmd:    start,
 	}
 	if !debian {

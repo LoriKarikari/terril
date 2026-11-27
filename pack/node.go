@@ -62,6 +62,9 @@ type nodeManager struct {
 // pin: datasource=npm depName=corepack
 const corepackVersion = "0.36.0"
 
+// pin: datasource=npm depName=pnpm
+const pnpmVersion = "12.23.0"
+
 var corepackYarn = func(*Node) []Step {
 	return []Step{
 		Env{"COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"},
@@ -84,7 +87,7 @@ var nodeManagers = map[string]nodeManager{
 		setup: func(n *Node) []Step {
 			v := n.ManagerVersion
 			if v == "" {
-				v = "latest"
+				v = pnpmVersion
 			}
 			return []Step{Run{Cmd: "npm install -g pnpm@" + v, Caches: []string{"/root/.npm"}}}
 		},

@@ -1,0 +1,10 @@
+{
+  "name": "node-pnpm",
+  "scripts": {
+    "build": "node build.js",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "ms": "2.1.3"
+  }
+}

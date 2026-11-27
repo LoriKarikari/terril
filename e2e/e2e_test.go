@@ -327,6 +327,14 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		r.fail(t, "dive efficiency below 95%%; files are duplicated or deleted across layers")
 		return
 	}
+	if debianRe.MatchString(rootfs.osRelease) && !debian13Re.MatchString(rootfs.osRelease) {
+		r.fail(t, "the image isn't on Debian 13, which every other image uses")
+		return
+	}
+	if !slices.Contains(rootfs.files, "etc/ssl/certs/ca-certificates.crt") {
+		r.fail(t, "the image has no CA certificates, so the app can't make TLS calls")
+		return
+	}
 	if slices.ContainsFunc(rootfs.files, func(p string) bool { return strings.HasSuffix(p, "HOST_MARKER") }) {
 		r.fail(t, "host node_modules or __pycache__ copied into the image")
 		return
@@ -352,6 +360,14 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	}
 	if m := summaryRe.FindSubmatch(plan); m != nil {
 		r.provider = string(m[1])
+	}
+	if latestRe.Match(plan) {
+		r.fail(t, "the plan installs a tool at latest; pin it, see AGENTS.md")
+		return
+	}
+	if ref, other, ok := twoTags(string(plan)); ok {
+		r.fail(t, "the plan pulls both %s and %s", ref, other)
+		return
 	}
 	user, err := output(exec.Command("docker", "image", "inspect", "-f", "{{.Config.User}}", image))
 	if err != nil {
@@ -411,6 +427,7 @@ type rootfs struct {
 	size         int64
 	files        []string
 	secretsFound []string
+	osRelease    string
 }
 
 func exportImage(t *testing.T, image string, secrets []string) (rootfs, error) {
@@ -447,6 +464,14 @@ func exportImage(t *testing.T, image string, secrets []string) (rootfs, error) {
 			return fs, err
 		}
 		fs.files = append(fs.files, h.Name)
+		if h.Name == "usr/lib/os-release" || h.Name == "etc/os-release" && h.Typeflag == tar.TypeReg {
+			b, err := io.ReadAll(tr)
+			if err != nil {
+				return fs, err
+			}
+			fs.osRelease = string(b)
+			continue
+		}
 		if len(secrets) > 0 && h.Typeflag == tar.TypeReg {
 			content, err := io.ReadAll(tr)
 			if err != nil {
@@ -615,7 +640,32 @@ func TestCache(t *testing.T) {
 	}
 }
 
-var summaryRe = regexp.MustCompile(`(?m)^# terril: (.*)$`)
+var (
+	summaryRe  = regexp.MustCompile(`(?m)^# terril: (.*)$`)
+	latestRe   = regexp.MustCompile(`[@:]latest\b`)
+	debianRe   = regexp.MustCompile(`(?m)^ID="?debian"?$`)
+	debian13Re = regexp.MustCompile(`(?m)^VERSION_ID="?13"?$`)
+)
+
+// Two versions of one image variant, such as sdk:10.0 and sdk:10.0.100, are two pulls of nearly
+// the same image. A build image and its slim or distroless variant are different images.
+func twoTags(plan string) (string, string, bool) {
+	tags := map[string]string{}
+	for _, m := range imageRefRe.FindAllStringSubmatch(plan, -1) {
+		ref := m[1] + m[2]
+		repo, tag, ok := strings.Cut(ref, ":")
+		if !ok {
+			continue
+		}
+		_, variant, _ := strings.Cut(tag, "-")
+		key := repo + "-" + variant
+		if seen, ok := tags[key]; ok && seen != ref {
+			return seen, ref, true
+		}
+		tags[key] = ref
+	}
+	return "", "", false
+}
 
 var (
 	installRe = regexp.MustCompile(`install|uv sync|npm ci|go mod download|dotnet restore|cargo chef cook`)

@@ -82,7 +82,7 @@ func planRuby(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			{From: "build", Src: []string{bundlePath + "/"}, Dst: bundlePath + "/", RootOwned: true, Exclude: gemExcludes},
 			{From: "build", Src: []string{"/app/"}, Dst: "/app/"},
 		},
-		Env: append(rubyEnv, Env{"HOME", "/tmp"}),
+		Env: rubyEnv,
 		Cmd: start,
 	}, nil
 }

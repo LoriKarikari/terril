@@ -92,7 +92,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	steps = append(steps, copyAssets(assets)...)
 	steps = append(steps, Run{Cmd: "dotnet publish " + shellQuote(d.Project) + " -c Release --no-restore -o /out -p:UseAppHost=false"})
 
-	hook := Stage{Name: "port-hook", From: dotnetImages + "sdk:" + version, Workdir: "/hook", Steps: []Step{
+	hook := Stage{Name: "port-hook", From: sdk, Workdir: "/hook", Steps: []Step{
 		Env{"DOTNET_CLI_TELEMETRY_OPTOUT", "1"},
 		Env{"DOTNET_NOLOGO", "1"},
 		File{Path: "/hook/TerrilPort.csproj", Content: fmt.Sprintf(portHookProject, d.TargetFramework)},
@@ -120,7 +120,7 @@ func planDotNet(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			{From: "port-hook", Src: []string{"/out/TerrilPort.dll"}, Dst: "/terril/TerrilPort.dll", RootOwned: true},
 			{From: "build", Src: []string{"/out/"}, Dst: "/app/"},
 		},
-		Env: []Env{{"DOTNET_STARTUP_HOOKS", "/terril/TerrilPort.dll"}, {"HOME", "/tmp"}},
+		Env: []Env{{"DOTNET_STARTUP_HOOKS", "/terril/TerrilPort.dll"}},
 		Cmd: cmd,
 	}, nil
 }
