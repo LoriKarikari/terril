@@ -296,6 +296,17 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		r.fail(t, "the build didn't warn %q, see %s", f.warning, log.Name())
 		return
 	}
+	if len(f.buildEnv) > 0 {
+		plan, err := output(f.terril(context.Background(), "plan", dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rerun := rerunSteps(out)
+		if i := slices.IndexFunc(installSteps(string(plan)), func(s string) bool { return slices.Contains(rerun, s) }); i >= 0 {
+			r.fail(t, "a new build env value reran the dependency install %s, see %s", installSteps(string(plan))[i], log.Name())
+			return
+		}
+	}
 
 	rootfs, err := exportImage(t, image, f.secrets)
 	if err != nil {

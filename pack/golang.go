@@ -72,12 +72,12 @@ func planGo(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		image, base, cgo = image+"-trixie", "gcr.io/distroless/cc-debian13", "1"
 	} else {
 		steps = append(steps, Run{
-			Cmd: "cgo=$(CGO_ENABLED=1 go list -deps -f '{{if and .CgoFiles (not .Standard)}}{{.ImportPath}} {{end}}' " + pkg + ") && " +
+			Cmd: "cgo=$(CGO_ENABLED=1 go list -deps -f '{{if and .CgoFiles (not .Standard)}}{{.ImportPath}} {{end}}' " + shellQuote(pkg) + ") && " +
 				`{ [ -z "$cgo" ] || { echo "terril: this app needs cgo for $cgo, which terril didn't detect. Please open an issue." >&2; exit 1; }; }`,
 			Caches: caches,
 		})
 	}
-	steps = append(steps, Run{Cmd: "CGO_ENABLED=" + cgo + " go build -trimpath -ldflags='-s -w' -o /out/app " + pkg, Caches: caches})
+	steps = append(steps, Run{Cmd: "CGO_ENABLED=" + cgo + " go build -trimpath -ldflags='-s -w' -o /out/app " + shellQuote(pkg), Caches: caches})
 
 	if f.needsDebianRuntime() {
 		base = "debian:trixie-slim"

@@ -151,7 +151,12 @@ func (a Add) dockerfile() string {
 
 func (a Arg) dockerfile() string { return "ARG " + string(a) }
 
-func (e Env) dockerfile() string  { return fmt.Sprintf("ENV %s=%q", e.Key, e.Value) }
+// Docker expands $ inside double quotes and reads backslash escapes its own way, so Go's %q
+// quoting changes the value.
+func (e Env) dockerfile() string {
+	return "ENV " + e.Key + `="` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`).Replace(e.Value) + `"`
+}
+
 func (u User) dockerfile() string { return "USER " + string(u) }
 
 func (ClearEntrypoint) dockerfile() string { return "ENTRYPOINT []" }
@@ -312,30 +317,26 @@ func isImage(ref string, stages []string) bool {
 // BuildEnvArg changes when a build env value changes, so Docker reruns the steps that read it.
 const BuildEnvArg = "TERRIL_BUILD_ENV"
 
-// Secret mounts don't invalidate Docker's cache, so BuildEnvArg goes in right after the source copy.
+// Only a stage that copies the source builds the app, so only its steps read the build env. Secret
+// mounts don't invalidate Docker's cache, so BuildEnvArg goes in right after the source copy.
 func withBuildEnv(steps []Step, names []string) []Step {
-	if len(names) == 0 {
+	argAt := slices.IndexFunc(steps, func(s Step) bool {
+		c, ok := s.(Copy)
+		return ok && c.From == "" && slices.Equal(c.Src, []string{"."})
+	})
+	if len(names) == 0 || argAt < 0 {
 		return steps
 	}
 	out := make([]Step, 0, len(steps)+1)
-	argAt := 0
 	for i, step := range steps {
-		if c, ok := step.(Copy); ok && c.From == "" && len(c.Src) == 1 && c.Src[0] == "." {
-			argAt = i + 1
-		}
-	}
-	for i, step := range steps {
-		if i == argAt {
-			out = append(out, Arg(BuildEnvArg))
-		}
 		if r, ok := step.(Run); ok {
 			r.Secrets = names
 			step = r
 		}
 		out = append(out, step)
-	}
-	if argAt == len(steps) {
-		out = append(out, Arg(BuildEnvArg))
+		if i == argAt {
+			out = append(out, Arg(BuildEnvArg))
+		}
 	}
 	return out
 }

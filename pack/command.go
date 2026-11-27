@@ -2,6 +2,7 @@ package pack
 
 import (
 	"strings"
+	"unicode"
 
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -25,7 +26,8 @@ func directCommand(script string) ([]Env, []string, bool) {
 		}
 		value := ""
 		if a.Value != nil {
-			if value, ok = literal(a.Value); !ok {
+			// An ENV line can't hold a newline, so such a value stays in the shell.
+			if value, ok = literal(a.Value); !ok || strings.ContainsFunc(value, unicode.IsControl) {
 				return nil, nil, false
 			}
 		}
