@@ -1,11 +1,13 @@
 package pack
 
 import (
-	"bufio"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path"
@@ -294,17 +296,33 @@ func readNode(f *Facts) (*Node, error) {
 	if pkg.Dependencies["vite"] != "" || pkg.DevDependencies["vite"] != "" {
 		n.ViteOutDir = "dist"
 		for _, name := range []string{"vite.config.ts", "vite.config.js", "vite.config.mts", "vite.config.mjs"} {
-			src, _ := f.read(name)
-			if m := viteOutDirRe.FindStringSubmatch(src); m != nil {
-				n.ViteOutDir = path.Clean(m[1])
-				break
+			src, ok := f.read(name)
+			if !ok {
+				continue
 			}
+			var dirs []string
+			for _, m := range viteOutDirRe.FindAllStringSubmatch(jsCommentRe.ReplaceAllString(src, ""), -1) {
+				if d := path.Clean(m[1]); !slices.Contains(dirs, d) {
+					dirs = append(dirs, d)
+				}
+			}
+			if len(dirs) > 1 {
+				return nil, fmt.Errorf("%s sets outDir to %s; terril can't tell which one vite build writes", name, strings.Join(dirs, " and "))
+			}
+			if len(dirs) == 1 {
+				n.ViteOutDir = dirs[0]
+			}
+			break
 		}
 	}
 	return n, nil
 }
 
-var viteOutDirRe = regexp.MustCompile(`outDir:\s*["']([^"']+)["']`)
+var (
+	viteOutDirRe = regexp.MustCompile(`outDir:\s*["']([^"']+)["']`)
+	// Block comments, and line comments that start a line, so a URL in a string survives.
+	jsCommentRe = regexp.MustCompile(`(?s:/\*.*?\*/)|(?m:^\s*//.*$)`)
+)
 
 func lockBins(lock string) (map[string]string, error) {
 	var doc struct {
@@ -495,11 +513,13 @@ func readMembers(root string, patterns []string) (map[string]Member, error) {
 }
 
 type Python struct {
-	Name         string
-	Manager      string
-	Requirements []string
-	Deps         map[string]bool
-	Version      string
+	Name    string
+	Manager string
+	// requirements.txt and the files it pulls in with -r or -c, for the install step to copy.
+	RequirementFiles []string
+	Requirements     []string
+	Deps             map[string]bool
+	Version          string
 	// main.py, app.py and wsgi.py, in that order, when the app has them.
 	Entries []string
 	// The module:variable that first assigns each call at the top of an entry file, such as
@@ -514,10 +534,10 @@ type Python struct {
 func readPython(f *Facts) (*Python, error) {
 	py := &Python{Manager: "pip", Deps: map[string]bool{}, Apps: map[string]string{}}
 	found := false
-	if s, ok := f.read("requirements.txt"); ok {
+	if f.Has("requirements.txt") {
 		found = true
-		for _, name := range requirementNames(s) {
-			py.Deps[name] = true
+		if err := f.readRequirements(py, "requirements.txt", true); err != nil {
+			return nil, err
 		}
 	}
 	if s, ok := f.read("pyproject.toml"); ok {
@@ -543,9 +563,15 @@ func readPython(f *Facts) (*Python, error) {
 			py.Deps[distName(spec)] = true
 		}
 		for name := range doc.Tool.Poetry.Dependencies {
-			py.Deps[distName(name)] = true
+			if name != "python" {
+				py.Deps[distName(name)] = true
+			}
 		}
 		py.Version = doc.Project.RequiresPython
+		// Poetry's own table holds the Python requirement when [project] has none.
+		if v, ok := doc.Tool.Poetry.Dependencies["python"].(string); ok && py.Version == "" {
+			py.Version = v
+		}
 	}
 	if !found {
 		return nil, nil
@@ -573,8 +599,12 @@ func readPython(f *Facts) (*Python, error) {
 	}
 	manage, _ := f.read("manage.py")
 	if m := djangoSettingsRe.FindStringSubmatch(manage); m != nil {
-		py.DjangoProject = m[1]
-		settings, _ := f.read(path.Join(strings.ReplaceAll(m[1], ".", "/"), "settings.py"))
+		py.DjangoProject, _, _ = strings.Cut(m[1], ".")
+		file := strings.ReplaceAll(m[1], ".", "/")
+		settings, ok := f.read(file + ".py")
+		if !ok {
+			settings, _ = f.read(file + "/__init__.py")
+		}
 		py.DjangoStaticRoot = staticRootRe.MatchString(settings)
 	}
 	return py, nil
@@ -582,7 +612,7 @@ func readPython(f *Facts) (*Python, error) {
 
 var (
 	assignCallRe     = regexp.MustCompile(`(?m)^(\w+)\s*=\s*(\w+)\(`)
-	djangoSettingsRe = regexp.MustCompile(`DJANGO_SETTINGS_MODULE["']\s*,\s*["']([\w.]+)\.settings["']`)
+	djangoSettingsRe = regexp.MustCompile(`DJANGO_SETTINGS_MODULE["']\s*,\s*["'](\w+(?:\.\w+)*\.settings(?:\.\w+)*)["']`)
 	staticRootRe     = regexp.MustCompile(`(?m)^STATIC_ROOT\s*=`)
 	distNameRe       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*`)
 	normalizeRe      = regexp.MustCompile(`[-_.]+`)
@@ -593,21 +623,35 @@ func distName(spec string) string {
 	return strings.ToLower(normalizeRe.ReplaceAllString(distNameRe.FindString(strings.TrimSpace(spec)), "-"))
 }
 
-func requirementNames(s string) []string {
-	var names []string
-	sc := bufio.NewScanner(strings.NewReader(s))
-	for sc.Scan() {
-		line, _, _ := strings.Cut(sc.Text(), "#")
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "-") {
-			continue
-		}
-		if name := distName(line); name != "" {
-			names = append(names, name)
+// readRequirements adds the deps of a requirements file and of the files it includes with -r.
+// A -c file only pins versions, so it is copied but adds no deps.
+func (f *Facts) readRequirements(py *Python, file string, deps bool) error {
+	if slices.Contains(py.RequirementFiles, file) {
+		return nil
+	}
+	s, _ := f.read(file)
+	py.RequirementFiles = append(py.RequirementFiles, file)
+	for _, line := range strings.Split(strings.ReplaceAll(s, "\\\n", ""), "\n") {
+		line = strings.TrimSpace(requirementCommentRe.ReplaceAllString(line, ""))
+		if m := includeRe.FindStringSubmatch(line); m != nil {
+			include := path.Join(path.Dir(file), m[2])
+			if !f.Has(include) {
+				return fmt.Errorf("%s includes %s, which isn't in the app", file, include)
+			}
+			if err := f.readRequirements(py, include, deps && (m[1] == "-r" || m[1] == "--requirement")); err != nil {
+				return err
+			}
+		} else if name := distName(line); deps && name != "" {
+			py.Deps[name] = true
 		}
 	}
-	return names
+	return nil
 }
+
+var (
+	requirementCommentRe = regexp.MustCompile(`(^|\s)#.*$`)
+	includeRe            = regexp.MustCompile(`^(-r|--requirement|-c|--constraint)[\s=]*(\S+)$`)
+)
 
 // findUvWorkspace walks up from an app to the uv workspace that lists it, stopping at the repo root.
 func findUvWorkspace(dir string) (*Workspace, error) {
@@ -679,11 +723,50 @@ type Ruby struct {
 }
 
 var (
-	lockGemRe         = regexp.MustCompile(`(?m)^    ([A-Za-z0-9_.-]+) \(`)
-	lockSectionRe     = regexp.MustCompile(`(?m)^([A-Z][A-Z ]*)\n((?:  .*\n?)*)`)
 	gemfileRubyRe     = regexp.MustCompile(`(?m)^\s*ruby\s+["']([^"']+)["']`)
 	rubyVersionNumber = regexp.MustCompile(`\d+(\.\d+){0,2}`)
 )
+
+// gemfileLock holds each top-level section of a Gemfile.lock, such as PLATFORMS, as its
+// indented lines.
+type gemfileLock map[string][]string
+
+func parseGemfileLock(s string) gemfileLock {
+	lock := gemfileLock{}
+	section := ""
+	for _, line := range strings.Split(s, "\n") {
+		switch {
+		case line == "":
+		case !strings.HasPrefix(line, " "):
+			section = strings.TrimSpace(line)
+			lock[section] = nil
+		default:
+			lock[section] = append(lock[section], line)
+		}
+	}
+	return lock
+}
+
+// gems lists the specs of every source section, including dependencies of dependencies.
+func (l gemfileLock) gems() map[string]bool {
+	gems := map[string]bool{}
+	for _, section := range []string{"GEM", "GIT", "PATH"} {
+		for _, line := range l[section] {
+			if name, _, ok := strings.Cut(line, " ("); ok && strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "     ") {
+				gems[strings.TrimSpace(name)] = true
+			}
+		}
+	}
+	return gems
+}
+
+func (l gemfileLock) fields(section string) []string {
+	var fields []string
+	for _, line := range l[section] {
+		fields = append(fields, strings.Fields(line)...)
+	}
+	return fields
+}
 
 func readRuby(f *Facts) (*Ruby, error) {
 	if !f.Has("Gemfile") {
@@ -694,15 +777,9 @@ func readRuby(f *Facts) (*Ruby, error) {
 		f.cantBuild("ruby", fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it"))
 		return &Ruby{}, nil
 	}
-	r := &Ruby{Gems: map[string]bool{}}
-	for _, m := range lockGemRe.FindAllStringSubmatch(lock, -1) {
-		r.Gems[m[1]] = true
-	}
-	sections := map[string][]string{}
-	for _, m := range lockSectionRe.FindAllStringSubmatch(lock, -1) {
-		sections[m[1]] = strings.Fields(m[2])
-	}
-	platforms := sections["PLATFORMS"]
+	parsed := parseGemfileLock(lock)
+	r := &Ruby{Gems: parsed.gems()}
+	platforms := parsed.fields("PLATFORMS")
 	switch {
 	case len(platforms) == 0:
 		f.cantBuild("ruby", fmt.Errorf("the Gemfile.lock lists no platforms; run bundle lock --add-platform x86_64-linux aarch64-linux"))
@@ -712,10 +789,13 @@ func readRuby(f *Facts) (*Ruby, error) {
 	}
 	if v := f.firstLine(f.Dir, ".ruby-version"); v != "" {
 		r.Version = rubyVersionNumber.FindString(v)
-	} else if v := sections["RUBY VERSION"]; len(v) > 1 {
+	} else if v := parsed.fields("RUBY VERSION"); len(v) > 1 {
 		r.Version = rubyVersionNumber.FindString(v[1])
-	} else if gemfile, _ := f.read("Gemfile"); gemfileRubyRe.MatchString(gemfile) {
-		r.Version = gemfileRubyRe.FindStringSubmatch(gemfile)[1]
+	} else {
+		gemfile, _ := f.read("Gemfile")
+		if m := gemfileRubyRe.FindStringSubmatch(gemfile); m != nil {
+			r.Version = m[1]
+		}
 	}
 	return r, nil
 }
@@ -1010,8 +1090,6 @@ var cgoModules = []string{
 	"github.com/confluentinc/confluent-kafka-go/v2",
 }
 
-var importCRe = regexp.MustCompile(`(?m)^\s*(import\s+)?"C"\s*$`)
-
 func goUsesCgo(f *Facts) (bool, error) {
 	for _, r := range f.Go.Require {
 		if slices.Contains(cgoModules, r.Mod.Path) {
@@ -1033,9 +1111,12 @@ func goUsesCgo(f *Facts) (bool, error) {
 		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
-		b, err := os.ReadFile(p)
-		found = err == nil && importCRe.Match(b)
-		return err
+		file, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		found = slices.ContainsFunc(file.Imports, func(i *ast.ImportSpec) bool { return i.Path.Value == `"C"` })
+		return nil
 	})
 	return found, err
 }

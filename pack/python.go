@@ -113,9 +113,9 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	case "pip":
 		// uv venv leaves pip out of the image; uv pip installs the same requirements.
 		steps = append(steps, Run{Cmd: "uv venv " + venv})
-		if f.Has("requirements.txt") {
+		if len(py.RequirementFiles) > 0 {
 			steps = append(steps,
-				Copy{Src: []string{"requirements.txt"}, Dst: "./"},
+				Copy{Src: py.RequirementFiles, Dst: "./", Parents: true},
 				Run{Cmd: "uv pip install -r requirements.txt", Caches: uvCache})
 		} else if len(py.Requirements) > 0 {
 			steps = append(steps, Run{Cmd: "uv pip install " + shellQuote(py.Requirements...), Caches: uvCache})
