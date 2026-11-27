@@ -20,10 +20,10 @@ const venv = "/app/.venv"
 
 const pythonDir = "/python"
 
-// renovate: datasource=docker depName=ghcr.io/astral-sh/uv
+// pin: datasource=docker depName=ghcr.io/astral-sh/uv
 const uvVersion = "0.13.5"
 
-// renovate: datasource=pypi depName=poetry
+// pin: datasource=pypi depName=poetry
 const poetryVersion = "2.5.1"
 
 // Parts of uv's Python a server never uses. The bin/python3.x executable embeds the

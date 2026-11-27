@@ -43,7 +43,7 @@ type nodeManager struct {
 	workspacePrune      func(install, pkg string) string
 }
 
-// renovate: datasource=npm depName=corepack
+// pin: datasource=npm depName=corepack
 const corepackVersion = "0.36.0"
 
 var corepackYarn = func(*Node) []Step {

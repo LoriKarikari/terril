@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Prints one row per pinned version: file, name, pinned, latest, and "outdated" when they differ.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+shape() { sed -E 's/[0-9]+/[0-9]+/g; s/\./\\./g' <<<"$1"; }
+
+newest() { grep -E "^$(shape "$1")\$" | sort -V | tail -1; }
+
+docker_tags() {
+    local name=$1
+    if [[ $name == ghcr.io/* ]]; then
+        local repo=${name#ghcr.io/} token
+        token=$(curl -fsS "https://ghcr.io/token?scope=repository:$repo:pull" | jq -r .token)
+        local url="https://ghcr.io/v2/$repo/tags/list?n=1000"
+        while [[ -n $url ]]; do
+            local headers
+            headers=$(mktemp)
+            curl -fsS -D "$headers" -H "Authorization: Bearer $token" "$url" | jq -r '.tags[]'
+            url=$(grep -i '^link:' "$headers" | grep -oP '<\K[^>]+' || true)
+            [[ -z $url ]] || url=https://ghcr.io$url
+            rm -f "$headers"
+        done
+        return
+    fi
+    [[ $name == */* ]] || name=library/$name
+    local url="https://hub.docker.com/v2/repositories/$name/tags?page_size=100&ordering=last_updated"
+    for _ in 1 2 3; do
+        local page
+        page=$(curl -fsS "$url")
+        jq -r '.results[].name' <<<"$page"
+        url=$(jq -r '.next // empty' <<<"$page")
+        [[ -n $url ]] || break
+    done
+}
+
+latest() {
+    local source=$1 name=$2 current=$3
+    case $source in
+    go) curl -fsS "https://proxy.golang.org/$name/@latest" | jq -r .Version ;;
+    docker) docker_tags "$name" | newest "$current" ;;
+    pypi) curl -fsS "https://pypi.org/pypi/$name/json" | jq -r .info.version ;;
+    npm) curl -fsS "https://registry.npmjs.org/$name/latest" | jq -r .version ;;
+    github-releases) gh api "repos/$name/releases/latest" --jq .tag_name ;;
+    *) echo "unknown source $source" >&2; return 1 ;;
+    esac
+}
+
+row() {
+    local status=""
+    [[ $3 == "$4" ]] || status=outdated
+    printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$status"
+}
+
+while IFS= read -r hit; do
+    file=${hit%%:*}
+    line=${hit#*:}
+    line=${line%%:*}
+    marker=$(sed -n "${line}p" "$file")
+    next=$(sed -n "$((line + 1))p" "$file")
+    source=$(grep -oP 'datasource=\K\S+' <<<"$marker")
+    name=$(grep -oP 'depName=\K\S+' <<<"$marker")
+    if [[ $source == github-release-attachments ]]; then
+        release=$(grep -oP 'digestVersion=\K\S+' <<<"$marker")
+        version=$(grep -h -A1 "pin: datasource=github-releases depName=$name\$" pack/*.go | grep -oP '"\K[^"]+(?=")')
+        row "$file" "$name checksum" "$release" "$version"
+        continue
+    fi
+    current=$(grep -oP '"\K[^"@]+(?="$)|@\K[^"]+(?="$)' <<<"$next")
+    row "$file" "$name" "$current" "$(latest "$source" "$name" "$current")"
+done < <(grep -rn -E '^(//|#) pin: ' pack justfile | cut -d: -f1,2)
+
+grep -H -oP 'uses: \K\S+@v[0-9]+' .github/workflows/*.yml | while IFS= read -r hit; do
+    file=${hit%%:*}
+    use=${hit##*:}
+    action=${use%@*}
+    major=$(gh api "repos/$action/releases/latest" --jq .tag_name | grep -oP '^v[0-9]+')
+    row "$file" "$action" "${use#*@}" "$major"
+done
+
+go list -m -u -f '{{if and (not .Indirect) (not .Main)}}{{.Path}} {{.Version}} {{with .Update}}{{.Version}}{{end}}{{end}}' all 2>/dev/null |
+    while read -r path version update; do
+        [[ -n $path ]] && row go.mod "$path" "$version" "${update:-$version}"
+    done

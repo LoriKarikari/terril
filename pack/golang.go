@@ -22,7 +22,7 @@ var goProvider = provider{
 	plan: planGo,
 }
 
-// renovate: datasource=docker depName=golang
+// pin: datasource=docker depName=golang
 const goVersion = "1.27"
 
 // The go and toolchain lines in go.mod are minimums, and a newer Go builds older code the same

@@ -17,7 +17,7 @@ var staticProvider = provider{
 	},
 }
 
-// renovate: datasource=docker depName=caddy versioning=docker
+// pin: datasource=docker depName=caddy versioning=docker
 const caddyVersion = "2.11-alpine"
 
 // Admin and automatic HTTPS are off because the container sits behind a proxy.

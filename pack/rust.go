@@ -14,19 +14,19 @@ var rustProvider = provider{
 	plan: planRust,
 }
 
-// renovate: datasource=docker depName=rust
+// pin: datasource=docker depName=rust
 const rustVersion = "1.99"
 
 // cargo-chef turns the manifests into a recipe, so dependencies compile in a layer that a source
 // edit doesn't invalidate.
 //
-// renovate: datasource=github-releases depName=LukeMathWalker/cargo-chef
+// pin: datasource=github-releases depName=LukeMathWalker/cargo-chef
 const cargoChefVersion = "v0.1.78"
 
-// renovate: datasource=github-release-attachments depName=LukeMathWalker/cargo-chef digestVersion=v0.1.78
+// pin: datasource=github-release-attachments depName=LukeMathWalker/cargo-chef digestVersion=v0.1.78
 const cargoChefAmd64 = "aca691abfbfbbe00d482e0ed2249eec3091b65e96a0ce92947fb5b254d48b16d"
 
-// renovate: datasource=github-release-attachments depName=LukeMathWalker/cargo-chef digestVersion=v0.1.78
+// pin: datasource=github-release-attachments depName=LukeMathWalker/cargo-chef digestVersion=v0.1.78
 const cargoChefArm64 = "cd59b90fce5fa84c4189648fec33404ec5491791eebdb812df5e7fca8336408d"
 
 // With a toolchain file in its source, the planner would download that Rust on every source edit.

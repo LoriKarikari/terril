@@ -1,6 +1,6 @@
-# renovate: datasource=go depName=github.com/golangci/golangci-lint/v2
+# pin: datasource=go depName=github.com/golangci/golangci-lint/v2
 golangci := "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0"
-# renovate: datasource=go depName=golang.org/x/vuln
+# pin: datasource=go depName=golang.org/x/vuln
 govulncheck := "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0"
 
 default:
@@ -19,6 +19,10 @@ test *apps:
 [positional-arguments]
 cache *apps:
     cd e2e && go test -count=1 -timeout 60m -parallel 1 -run TestCache -apps "$(IFS=,; echo "$*")" .
+
+# Lists every pinned version next to the latest one upstream, and marks the outdated ones.
+pins:
+    scripts/pins
 
 fmt:
     {{golangci}} fmt ./...

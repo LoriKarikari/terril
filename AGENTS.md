@@ -17,6 +17,7 @@ terril is an open-source CLI that builds a container image from a Node, Python, 
 - `just test` runs the end-to-end tests in `e2e/e2e_test.go`. `just test python-flask` runs one app.
 - `just cache` checks that a source edit doesn't rerun the dependency install.
 - `just lint` runs golangci-lint (with gofmt and goimports) and govulncheck. `just fmt` formats the code.
+- `just pins` lists every pinned version, GitHub action and Go module next to the latest one upstream. A weekly Amp schedule bumps the outdated ones.
 - `just commits` checks that commits since `origin/main` follow the commit message rules in `CONTRIBUTING.md`.
 
 ## Shipping
@@ -32,7 +33,7 @@ The repository takes no pull requests. Everyone else, agents included, opens an 
 - When two answers are equally likely, fail with an error that names both. Never pick one by list order.
 - Images run as UID 1000. A change that makes any image run as root is wrong.
 - Images contain only what the app needs at runtime. No dev dependencies, no host `node_modules` or `__pycache__`, no build tools.
-- Pin every tool version terril installs, such as uv, Poetry and corepack. Put each version in its own `const` with a `// renovate: datasource=... depName=...` comment above it, so Renovate keeps it current.
+- Pin every tool version terril installs, such as uv, Poetry and corepack. Put each version in its own `const` with a `// pin: datasource=... depName=...` comment above it, so `just pins` checks it.
 - Every change gets an end-to-end test app in `e2e/testdata/` that fails without the change. Don't write unit tests.
 - Title changes to CI, tests or tooling `ci:`, `test:` or `chore:`, never `fix(ci):`. `feat`, `fix` and `perf` titles go into the release notes.
 - Write a comment only when the code can't show why it's written that way. Never narrate what the code does.
