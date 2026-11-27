@@ -162,7 +162,7 @@ func (f *Facts) readAll() error {
 		if f.Python.Name == "" {
 			f.cantBuild("python", fmt.Errorf("%s/pyproject.toml has no project name, which uv needs to select it", ws.App))
 		}
-		f.Python.Manager = "uv"
+		f.Python.Manager = PythonUv
 		if v := f.firstLine(ws.Root, ".python-version"); v != "" && !f.Has(".python-version") {
 			f.Python.Version = v
 		}
@@ -192,9 +192,27 @@ func (f *Facts) readAll() error {
 	return nil
 }
 
+type NodeManager string
+
+const (
+	NodeNPM       NodeManager = "npm"
+	NodePNPM      NodeManager = "pnpm"
+	NodeYarn      NodeManager = "yarn"
+	NodeYarnBerry NodeManager = "yarn-berry"
+	NodeBun       NodeManager = "bun"
+)
+
+type PythonManager string
+
+const (
+	PythonPip    PythonManager = "pip"
+	PythonUv     PythonManager = "uv"
+	PythonPoetry PythonManager = "poetry"
+)
+
 type Node struct {
 	Package        PackageJSON
-	Manager        string
+	Manager        NodeManager
 	ManagerVersion string
 	Lockfile       string
 	Version        string
@@ -217,12 +235,15 @@ type PackageJSON struct {
 	} `json:"engines"`
 }
 
-var nodeLockfiles = []struct{ file, manager string }{
-	{"pnpm-lock.yaml", "pnpm"},
-	{"package-lock.json", "npm"},
-	{"yarn.lock", "yarn"},
-	{"bun.lock", "bun"},
-	{"bun.lockb", "bun"},
+var nodeLockfiles = []struct {
+	file    string
+	manager NodeManager
+}{
+	{"pnpm-lock.yaml", NodePNPM},
+	{"package-lock.json", NodeNPM},
+	{"yarn.lock", NodeYarn},
+	{"bun.lock", NodeBun},
+	{"bun.lockb", NodeBun},
 }
 
 func readNode(f *Facts) (*Node, error) {
@@ -236,7 +257,7 @@ func readNode(f *Facts) (*Node, error) {
 	}
 	// bun.lock and bun.lockb are one manager's, so only lockfiles of different managers clash.
 	var lockfiles []string
-	managers := map[string]bool{}
+	managers := map[NodeManager]bool{}
 	for _, l := range nodeLockfiles {
 		if !f.rootHas(l.file) || managers[l.manager] {
 			continue
@@ -264,14 +285,16 @@ func readNode(f *Facts) (*Node, error) {
 	if pm != "" {
 		name, version, _ := strings.Cut(strings.SplitN(pm, "+", 2)[0], "@")
 		switch {
-		case n.Manager == "" || name == n.Manager:
-			n.Manager, n.ManagerVersion = name, version
-		default:
+		case n.Manager != "" && NodeManager(name) != n.Manager:
 			f.cantBuild("node", fmt.Errorf("packageManager is %s, but the lockfile is %s; keep the lockfile of the manager the app uses", pm, n.Lockfile))
+		case !slices.Contains([]NodeManager{NodeNPM, NodePNPM, NodeYarn, NodeBun}, NodeManager(name)):
+			f.cantBuild("node", fmt.Errorf("%s isn't supported yet; use npm, pnpm, yarn or bun", name))
+		default:
+			n.Manager, n.ManagerVersion = NodeManager(name), version
 		}
 	}
 	if n.Manager == "" {
-		n.Manager = "npm"
+		n.Manager = NodeNPM
 	}
 	if n.Lockfile == "package-lock.json" && f.Workspace == nil {
 		lock, _ := f.read("package-lock.json")
@@ -280,11 +303,11 @@ func readNode(f *Facts) (*Node, error) {
 			return nil, err
 		}
 	}
-	if n.Manager == "yarn" {
+	if n.Manager == NodeYarn {
 		lock, _ := f.rootRead("yarn.lock")
 		major, _, _ := strings.Cut(n.ManagerVersion, ".")
 		if f.rootHas(".yarnrc.yml") || strings.Contains(lock, "__metadata:") || major != "" && major != "1" {
-			n.Manager = "yarn-berry"
+			n.Manager = NodeYarnBerry
 			var yarnrc struct {
 				NodeLinker string `yaml:"nodeLinker"`
 			}
@@ -525,7 +548,7 @@ func readMembers(root string, patterns []string) (map[string]Member, error) {
 
 type Python struct {
 	Name    string
-	Manager string
+	Manager PythonManager
 	// requirements.txt and the files it pulls in with -r or -c, for the install step to copy.
 	RequirementFiles []string
 	Requirements     []string
@@ -543,7 +566,7 @@ type Python struct {
 }
 
 func readPython(f *Facts) (*Python, error) {
-	py := &Python{Manager: "pip", Deps: map[string]bool{}, Apps: map[string]string{}}
+	py := &Python{Manager: PythonPip, Deps: map[string]bool{}, Apps: map[string]string{}}
 	found := false
 	if f.Has("requirements.txt") {
 		found = true
@@ -589,9 +612,9 @@ func readPython(f *Facts) (*Python, error) {
 	}
 	switch {
 	case f.Has("uv.lock"):
-		py.Manager = "uv"
+		py.Manager = PythonUv
 	case f.Has("poetry.lock"):
-		py.Manager = "poetry"
+		py.Manager = PythonPoetry
 	}
 	if v := f.firstLine(f.Dir, ".python-version"); v != "" {
 		py.Version = v

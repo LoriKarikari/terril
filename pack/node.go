@@ -1,6 +1,7 @@
 package pack
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -22,7 +23,7 @@ var nodeProvider = provider{
 	},
 	plan: planNode,
 	runtime: &runtime{versions: &nodeVersions, version: func(f *Facts) (string, error) {
-		if f.Node.Manager == "bun" {
+		if f.Node.Manager == NodeBun {
 			return "", nil
 		}
 		return nodeVersion(f)
@@ -35,7 +36,7 @@ const assetsDir = "/assets"
 // The build writes its output among the sources and the install's files, such as Yarn's
 // .pnp.cjs, so only the files it wrote after the stamp go to the app.
 func nodeAssetStage(f *Facts, name string) (Stage, error) {
-	s, err := nodeBuild(f, name, nil, false)
+	s, err := nodeBuild(f, name, nodeFrameworkFor(f))
 	if err != nil {
 		return s, err
 	}
@@ -50,13 +51,15 @@ func nodeAssetStage(f *Facts, name string) (Stage, error) {
 }
 
 type nodeManager struct {
-	image               func(f *Facts) (string, error)
-	setup               func(n *Node) []Step
-	install, frozen     string
-	prune, cache        string
-	run, start, runFile string
-	exec                string
-	workspacePrune      func(install, pkg string) string
+	image           func(f *Facts) (string, error)
+	setup           func(n *Node) []Step
+	install, frozen string
+	prune, cache    string
+	// runScript runs a package.json script, startCmd runs the start script, fileRunner runs a
+	// JavaScript file, and binRunner runs a package bin.
+	runScript, startCmd, fileRunner string
+	binRunner                       string
+	workspacePrune                  func(install, pkg string) string
 }
 
 // pin: datasource=npm depName=corepack
@@ -65,7 +68,7 @@ const corepackVersion = "0.36.0"
 // pin: datasource=npm depName=pnpm
 const pnpmVersion = "12.23.0"
 
-var corepackYarn = func(*Node) []Step {
+func corepackYarn(*Node) []Step {
 	return []Step{
 		Env{"COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"},
 		Env{"COREPACK_ENABLE_AUTO_PIN", "0"},
@@ -73,16 +76,16 @@ var corepackYarn = func(*Node) []Step {
 	}
 }
 
-var nodeManagers = map[string]nodeManager{
-	"npm": {
+var nodeManagers = map[NodeManager]nodeManager{
+	NodeNPM: {
 		image: nodeImage, install: "npm install", frozen: "npm ci",
 		prune: "npm prune --omit=dev", cache: "/root/.npm",
-		run: "npm run", start: "npm start", runFile: "node", exec: "npx",
+		runScript: "npm run", startCmd: "npm start", fileRunner: "node", binRunner: "npx",
 		workspacePrune: func(install, pkg string) string {
 			return install + " --omit=dev --include-workspace-root --workspace=" + shellQuote(pkg)
 		},
 	},
-	"pnpm": {
+	NodePNPM: {
 		image: nodeImage,
 		setup: func(n *Node) []Step {
 			v := n.ManagerVersion
@@ -93,20 +96,20 @@ var nodeManagers = map[string]nodeManager{
 		},
 		install: "pnpm install", frozen: "pnpm install --frozen-lockfile",
 		prune: "pnpm prune --prod", cache: "/root/.local/share/pnpm/store",
-		run: "pnpm run", start: "npm start", runFile: "node", exec: "pnpm exec",
+		runScript: "pnpm run", startCmd: "npm start", fileRunner: "node", binRunner: "pnpm exec",
 		workspacePrune: func(install, pkg string) string {
 			return install + " --prod --filter " + shellQuote(pkg+"...")
 		},
 	},
-	"yarn": {
+	NodeYarn: {
 		image: nodeImage, setup: corepackYarn,
 		install: "yarn install", frozen: "yarn install --frozen-lockfile",
 		prune: "yarn install --production --frozen-lockfile --ignore-scripts --prefer-offline", cache: "/usr/local/share/.cache/yarn",
-		run: "yarn run", start: "npm start", runFile: "node", exec: "yarn",
+		runScript: "yarn run", startCmd: "npm start", fileRunner: "node", binRunner: "yarn",
 		// Yarn 1 can't install one member alone, so other members' production dependencies stay.
 		workspacePrune: func(install, _ string) string { return install + " --production" },
 	},
-	"yarn-berry": {
+	NodeYarnBerry: {
 		image: nodeImage,
 		setup: func(n *Node) []Step {
 			// Plug'n'Play loads packages from the cache at runtime, so it has to live in the image.
@@ -114,17 +117,17 @@ var nodeManagers = map[string]nodeManager{
 		},
 		install: "yarn install", frozen: "yarn install --immutable",
 		// focus leaves dev dependency zips in the cache, so it refills an empty one.
-		prune: "rm -rf .yarn/cache && yarn workspaces focus --all --production",
-		run:   "yarn run", start: "npm start", runFile: "node", exec: "yarn",
+		prune:     "rm -rf .yarn/cache && yarn workspaces focus --all --production",
+		runScript: "yarn run", startCmd: "npm start", fileRunner: "node", binRunner: "yarn",
 		workspacePrune: func(_, pkg string) string {
 			return "rm -rf .yarn/cache && yarn workspaces focus --production " + shellQuote(pkg)
 		},
 	},
-	"bun": {
+	NodeBun: {
 		image:   func(f *Facts) (string, error) { return "oven/bun:" + bunVersion(f.Node) + "-slim", nil },
 		install: "bun install", frozen: "bun install --frozen-lockfile",
 		prune: "rm -rf node_modules && bun install --production --frozen-lockfile", cache: "/root/.bun/install/cache",
-		run: "bun run", start: "bun run start", runFile: "bun", exec: "bunx",
+		runScript: "bun run", startCmd: "bun run start", fileRunner: "bun", binRunner: "bunx",
 		workspacePrune: func(install, pkg string) string {
 			return install + " --production --filter " + shellQuote(pkg)
 		},
@@ -177,66 +180,73 @@ func nodeImage(f *Facts) (string, error) {
 	return "node:" + v + "-trixie-slim", err
 }
 
-func distrolessNodeImage(f *Facts) string {
-	v, _ := nodeVersion(f)
-	return "gcr.io/distroless/nodejs" + v + "-debian13"
+func distrolessNodeImage(f *Facts) (string, error) {
+	v, err := nodeVersion(f)
+	return "gcr.io/distroless/nodejs" + v + "-debian13", err
 }
 
-func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error) {
+// nodeBuild installs and builds the app. The caller adds the production prune when the image
+// keeps node_modules.
+func nodeBuild(f *Facts, name string, fw *nodeFramework) (Stage, error) {
 	n := f.Node
-	m, ok := nodeManagers[n.Manager]
-	if !ok {
-		return Stage{}, fmt.Errorf("%s isn't supported yet; use npm, pnpm, yarn or bun", n.Manager)
-	}
+	m := nodeManagers[n.Manager]
 	image, err := m.image(f)
 	if err != nil {
 		return Stage{}, err
 	}
-
 	var steps []Step
 	if m.setup != nil {
 		steps = append(steps, m.setup(n)...)
 	}
-	if fw := nodeFrameworkFor(f); fw != nil {
+	if fw != nil {
 		for _, e := range fw.buildEnv {
 			steps = append(steps, e)
 		}
 	}
-	install := m.install
-	if n.Lockfile != "" {
-		install = m.frozen
-	}
 	if f.Workspace != nil {
-		build, err := workspaceBuild(f, m)
-		if err != nil {
-			return Stage{}, err
-		}
-		// The install reads every member's package.json, but not their source.
-		manifests := []string{"package.json"}
-		for _, name := range []string{n.Lockfile, "pnpm-workspace.yaml", ".yarnrc.yml", ".yarn/releases", ".yarn/plugins", ".yarn/patches", "patches"} {
-			if name != "" && f.rootHas(name) {
-				manifests = append(manifests, name)
-			}
-		}
-		for _, dir := range f.Workspace.Dirs {
-			manifests = append(manifests, dir+"/package.json")
-		}
-		steps = append(steps,
-			Copy{Src: manifests, Dst: "./", Parents: true},
-			Run{Cmd: install, Caches: m.caches()},
-			copySource(),
-		)
-		if build != "" {
-			steps = append(steps, Run{Cmd: build})
-		}
-		if prune && m.workspacePrune != nil {
-			steps = append(steps, Run{
-				Cmd:    "find . -name node_modules -type d -prune -exec rm -rf {} + && " + m.workspacePrune(install, n.Package.Name),
-				Caches: m.caches(),
-			})
-		}
-		return Stage{Name: name, From: fromImage(image), Steps: steps}, nil
+		steps, err = nodeWorkspaceBuild(f, m, steps)
+	} else {
+		steps = nodePackageBuild(f, m, steps)
 	}
+	return Stage{Name: name, From: fromImage(image), Steps: steps}, err
+}
+
+func nodeInstall(n *Node, m nodeManager) string {
+	if n.Lockfile != "" {
+		return m.frozen
+	}
+	return m.install
+}
+
+func nodeWorkspaceBuild(f *Facts, m nodeManager, steps []Step) ([]Step, error) {
+	n := f.Node
+	build, err := workspaceBuild(f, m)
+	if err != nil {
+		return nil, err
+	}
+	// The install reads every member's package.json, but not their source.
+	manifests := []string{"package.json"}
+	for _, name := range []string{n.Lockfile, "pnpm-workspace.yaml", ".yarnrc.yml", ".yarn/releases", ".yarn/plugins", ".yarn/patches", "patches"} {
+		if name != "" && f.rootHas(name) {
+			manifests = append(manifests, name)
+		}
+	}
+	for _, dir := range f.Workspace.Dirs {
+		manifests = append(manifests, dir+"/package.json")
+	}
+	steps = append(steps,
+		Copy{Src: manifests, Dst: "./", Parents: true},
+		Run{Cmd: nodeInstall(n, m), Caches: m.caches()},
+		copySource(),
+	)
+	if build != "" {
+		steps = append(steps, Run{Cmd: build})
+	}
+	return steps, nil
+}
+
+func nodePackageBuild(f *Facts, m nodeManager, steps []Step) []Step {
+	n := f.Node
 	manifests := []string{"package.json"}
 	if n.Lockfile != "" {
 		manifests = append(manifests, n.Lockfile)
@@ -246,17 +256,26 @@ func nodeBuild(f *Facts, name string, assets []string, prune bool) (Stage, error
 	}
 	steps = append(steps,
 		Copy{Src: manifests, Dst: "./"},
-		Run{Cmd: install, Caches: m.caches()},
+		Run{Cmd: nodeInstall(n, m), Caches: m.caches()},
 		copySource(),
 	)
-	steps = append(steps, copyAssets(assets)...)
 	if n.Package.Scripts["build"] != "" {
-		steps = append(steps, Run{Cmd: m.run + " build"})
+		steps = append(steps, Run{Cmd: m.runScript + " build"})
 	}
-	if prune {
-		steps = append(steps, Run{Cmd: m.prune, Caches: m.caches()})
+	return steps
+}
+
+// nodePrune drops dev dependencies from node_modules. A workspace prunes to the app's own
+// dependencies.
+func nodePrune(f *Facts) Run {
+	m := nodeManagers[f.Node.Manager]
+	if f.Workspace != nil {
+		return Run{
+			Cmd:    "find . -name node_modules -type d -prune -exec rm -rf {} + && " + m.workspacePrune(nodeInstall(f.Node, m), f.Node.Package.Name),
+			Caches: m.caches(),
+		}
 	}
-	return Stage{Name: name, From: fromImage(image), Steps: steps}, nil
+	return Run{Cmd: m.prune, Caches: m.caches()}
 }
 
 func workspaceBuild(f *Facts, m nodeManager) (string, error) {
@@ -266,13 +285,13 @@ func workspaceBuild(f *Facts, m nodeManager) (string, error) {
 	}
 	switch {
 	case f.rootHas("turbo.json"):
-		return m.exec + " turbo run build --filter=" + shellQuote(name), nil
-	case f.Node.Manager == "pnpm":
+		return m.binRunner + " turbo run build --filter=" + shellQuote(name), nil
+	case f.Node.Manager == NodePNPM:
 		return "pnpm --filter " + shellQuote(name+"...") + " run build", nil
 	}
 	var builds []string
 	for _, dir := range buildOrder(f.Workspace.Members, name) {
-		builds = append(builds, "(cd "+shellQuote(dir)+" && "+m.run+" build)")
+		builds = append(builds, "(cd "+shellQuote(dir)+" && "+m.runScript+" build)")
 	}
 	return strings.Join(builds, " && "), nil
 }
@@ -304,74 +323,60 @@ func nodeStart(f *Facts) (Cmd, error) {
 	pkg := f.Node.Package
 	m := nodeManagers[f.Node.Manager]
 	if pkg.Scripts["start"] != "" {
-		return Cmd(strings.Fields(m.start)), nil
+		return Cmd(strings.Fields(m.startCmd)), nil
 	}
 	for _, file := range []string{pkg.Main, "server.js", "index.js", "server.ts", "index.ts"} {
 		if file != "" && f.Has(file) {
-			return Cmd{m.runFile, file}, nil
+			return Cmd{m.fileRunner, file}, nil
 		}
 	}
-	return nil, fmt.Errorf("no start command: add a \"start\" script to package.json, or a server.js")
+	return nil, errors.New("no start command: add a \"start\" script to package.json, or a server.js")
+}
+
+// Astro, Nitro and others listen on HOST, often localhost by default.
+var nodeEnv = []Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}
+
+// A distroless start runs node, or bun on Bun, with the arguments of start. check verifies at
+// build time that a package bin the start script calls is a Node script.
+type distrolessStart struct {
+	args  []string
+	env   []Env
+	check []Step
 }
 
 // Distroless images have no shell or package manager, so the start script must be one call to
-// node, to bun on Bun, or to a package bin that package-lock.json maps to a file. The build then
-// checks that file is a Node script.
-func nodeDistroless(f *Facts, rt Runtime, build Stage) (Runtime, Stage) {
-	start, err := nodeStart(f)
-	if err != nil || f.needsDebianRuntime() {
-		return rt, build
+// node, to bun on Bun, or to a package bin that package-lock.json maps to a file.
+func nodeDistrolessStart(f *Facts, start Cmd) (distrolessStart, bool) {
+	script := f.Node.Package.Scripts["start"]
+	if script == "" {
+		return distrolessStart{args: start[1:]}, true
 	}
-	bun := f.Node.Manager == "bun"
+	env, args, ok := directCommand(script)
+	if !ok {
+		return distrolessStart{}, false
+	}
 	var check []Step
-	if script := f.Node.Package.Scripts["start"]; script != "" {
-		env, args, ok := directCommand(script)
-		if !ok {
-			return rt, build
-		}
-		if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
-			args = append([]string{"node", bin}, args[1:]...)
-			check = []Step{Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
-				"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}}
-		}
-		runtimeCall := args[0] == "node" || bun && args[0] == "bun"
-		if !runtimeCall || len(args) < 2 {
-			return rt, build
-		}
-		start = Cmd(args)
-		rt.Env = append(rt.Env, env...)
+	if bin, found := f.Node.Bins[args[0]]; found && args[0] != "node" {
+		args = append([]string{"node", bin}, args[1:]...)
+		check = []Step{Run{Cmd: "case \"$(head -c 64 " + shellQuote(bin) + ")\" in '#!'*node*) ;; *) " +
+			"echo " + shellQuote("terril: "+bin+" isn't a Node script, so it can't run on distroless; set start in terril.toml") + " >&2; exit 1;; esac"}}
 	}
-	if bun {
-		rt.From, rt.Cmd = "oven/bun:"+bunVersion(f.Node)+"-distroless", append(Cmd{"bun"}, start[1:]...)
-	} else {
-		rt.From, rt.Cmd = distrolessNodeImage(f), append(Cmd{"/nodejs/bin/node"}, start[1:]...)
+	runtimeCall := args[0] == "node" || f.Node.Manager == NodeBun && args[0] == "bun"
+	if !runtimeCall || len(args) < 2 {
+		return distrolessStart{}, false
 	}
-	build.Steps = append(build.Steps, check...)
-	return rt, build
+	return distrolessStart{args: args[1:], env: env, check: check}, true
 }
 
-func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
+func planNode(f *Facts, _ []string) ([]Stage, Runtime, error) {
 	if fw := nodeFrameworkFor(f); fw != nil {
-		build, err := nodeBuild(f, "build", assets, false)
-		if err != nil {
-			return nil, Runtime{}, err
-		}
-		rt := Runtime{
-			From:   build.From.Image,
-			Copies: fw.copies(f),
-			Env:    append([]Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}, fw.env...),
-			Cmd:    append(Cmd{"node"}, fw.cmd...),
-		}
-		if !f.needsDebianRuntime() {
-			rt.From = distrolessNodeImage(f)
-			rt.Cmd[0] = "/nodejs/bin/node"
-		}
-		return []Stage{build}, rt, nil
+		return nodeFrameworkPlan(f, fw)
 	}
-	build, err := nodeBuild(f, "build", assets, true)
+	build, err := nodeBuild(f, buildStage, nil)
 	if err != nil {
 		return nil, Runtime{}, err
 	}
+	build.Steps = append(build.Steps, nodePrune(f))
 	start, err := nodeStart(f)
 	if err != nil && f.Start == "" {
 		out := f.Node.ViteOutDir
@@ -386,8 +391,7 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		rt, err := staticRuntime(f, site, true)
 		return []Stage{build}, rt, err
 	}
-	// Astro, Nitro and others listen on HOST, often localhost by default.
-	env := []Env{{"NODE_ENV", "production"}, {"HOST", "0.0.0.0"}}
+	env := slices.Clone(nodeEnv)
 	if f.Node.PnP {
 		env = append(env, Env{"NODE_OPTIONS", "--require /app/.pnp.cjs"})
 	}
@@ -397,9 +401,47 @@ func planNode(f *Facts, assets []string) ([]Stage, Runtime, error) {
 		Env:    env,
 		Cmd:    start,
 	}
-	rt, build = nodeDistroless(f, rt, build)
+	if err != nil || f.needsDebianRuntime() {
+		return []Stage{build}, nodeWorkdir(f, rt), nil
+	}
+	if ds, ok := nodeDistrolessStart(f, start); ok {
+		if f.Node.Manager == NodeBun {
+			rt.From, rt.Cmd = "oven/bun:"+bunVersion(f.Node)+"-distroless", append(Cmd{"bun"}, ds.args...)
+		} else {
+			if rt.From, err = distrolessNodeImage(f); err != nil {
+				return nil, Runtime{}, err
+			}
+			rt.Cmd = append(Cmd{"/nodejs/bin/node"}, ds.args...)
+		}
+		rt.Env = append(rt.Env, ds.env...)
+		build.Steps = append(build.Steps, ds.check...)
+	}
+	return []Stage{build}, nodeWorkdir(f, rt), nil
+}
+
+func nodeWorkdir(f *Facts, rt Runtime) Runtime {
 	if f.Workspace != nil {
 		rt.Workdir = "/app/" + f.Workspace.App
+	}
+	return rt
+}
+
+func nodeFrameworkPlan(f *Facts, fw *nodeFramework) ([]Stage, Runtime, error) {
+	build, err := nodeBuild(f, buildStage, fw)
+	if err != nil {
+		return nil, Runtime{}, err
+	}
+	rt := Runtime{
+		From:   build.From.Image,
+		Copies: fw.copies(f),
+		Env:    slices.Concat(nodeEnv, fw.env),
+		Cmd:    append(Cmd{"node"}, fw.nodeArgs...),
+	}
+	if !f.needsDebianRuntime() {
+		if rt.From, err = distrolessNodeImage(f); err != nil {
+			return nil, Runtime{}, err
+		}
+		rt.Cmd[0] = "/nodejs/bin/node"
 	}
 	return []Stage{build}, rt, nil
 }
@@ -412,8 +454,7 @@ type nodeFramework struct {
 	buildEnv []Env
 	copies   func(f *Facts) []Copy
 	env      []Env
-	// Arguments to node.
-	cmd Cmd
+	nodeArgs []string
 }
 
 var nodeFrameworks = []nodeFramework{
@@ -433,8 +474,8 @@ var nodeFrameworks = []nodeFramework{
 			return copies
 		},
 		// Docker sets HOSTNAME to the container ID, and Next binds to it.
-		env: []Env{{"HOSTNAME", "0.0.0.0"}},
-		cmd: Cmd{"server.js"},
+		env:      []Env{{"HOSTNAME", "0.0.0.0"}},
+		nodeArgs: []string{"server.js"},
 	},
 	{
 		dep:    "nuxt",
@@ -442,13 +483,13 @@ var nodeFrameworks = []nodeFramework{
 		copies: func(f *Facts) []Copy {
 			return []Copy{{From: fromStage(buildStage), Src: []string{"/app/.output/"}, Dst: "/app/.output/", Exclude: nodeModulesExcludes(f)}}
 		},
-		cmd: Cmd{".output/server/index.mjs"},
+		nodeArgs: []string{".output/server/index.mjs"},
 	},
 }
 
 func nodeFrameworkFor(f *Facts) *nodeFramework {
 	n := f.Node
-	if f.Workspace != nil || n.PnP || nodeManagers[n.Manager].runFile != "node" || f.Start != "" {
+	if f.Workspace != nil || n.PnP || n.Manager == NodeBun || f.Start != "" {
 		return nil
 	}
 	for i, fw := range nodeFrameworks {

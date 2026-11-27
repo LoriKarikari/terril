@@ -90,53 +90,11 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 			Run{Cmd: "uv python install " + v, Caches: uvCache},
 		)
 	}
-	switch py.Manager {
-	case "uv":
-		if ws := f.UvWorkspace; ws != nil {
-			// Dependencies install from the manifests alone; members need their source to build.
-			manifests := []string{"pyproject.toml", "uv.lock"}
-			for _, dir := range ws.Dirs {
-				manifests = append(manifests, dir+"/pyproject.toml")
-			}
-			sync := "uv sync --frozen --no-dev --package " + shellQuote(py.Name)
-			steps = append(steps,
-				Copy{Src: manifests, Dst: "./", Parents: true},
-				Run{Cmd: sync + " --no-install-workspace", Caches: uvCache},
-				copySource(),
-				Run{Cmd: sync, Caches: uvCache},
-			)
-		} else {
-			steps = append(steps,
-				Copy{Src: []string{"pyproject.toml", "uv.lock"}, Dst: "./"},
-				Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: uvCache},
-				copySource(),
-				Run{Cmd: "uv sync --frozen --no-dev", Caches: uvCache},
-			)
-		}
-	case "pip":
-		// uv venv leaves pip out of the image; uv pip installs the same requirements.
-		steps = append(steps, Run{Cmd: "uv venv " + venv})
-		if len(py.RequirementFiles) > 0 {
-			steps = append(steps,
-				Copy{Src: py.RequirementFiles, Dst: "./", Parents: true},
-				Run{Cmd: "uv pip install -r requirements.txt", Caches: uvCache})
-		} else if len(py.Requirements) > 0 {
-			steps = append(steps, Run{Cmd: "uv pip install " + shellQuote(py.Requirements...), Caches: uvCache})
-		}
-	case "poetry":
-		steps = append(steps,
-			Run{Cmd: "uv venv " + venv},
-			Env{"UV_TOOL_BIN_DIR", "/usr/local/bin"},
-			Run{Cmd: "uv tool install poetry==" + poetryVersion, Caches: uvCache},
-			Env{"POETRY_VIRTUALENVS_IN_PROJECT", "true"},
-			Env{"POETRY_NO_INTERACTION", "1"},
-			Copy{Src: []string{"pyproject.toml", "poetry.lock"}, Dst: "./"},
-			Run{Cmd: "poetry install --only main --no-root", Caches: caches("/root/.cache/pypoetry")},
-		)
+	install, ok := pythonInstalls[py.Manager]
+	if !ok {
+		return nil, Runtime{}, fmt.Errorf("terril has no install steps for %s", py.Manager)
 	}
-	if py.Manager != "uv" {
-		steps = append(steps, copySource())
-	}
+	steps = append(steps, install(f, uvCache)...)
 	steps = append(steps, copyAssets(assets)...)
 	// collectstatic exits with an error when STATIC_ROOT is unset.
 	if py.Deps["django"] && py.DjangoStaticRoot {
@@ -167,18 +125,77 @@ func planPython(f *Facts, assets []string) ([]Stage, Runtime, error) {
 	return []Stage{{Name: buildStage, From: fromImage(buildImage), Steps: steps}}, rt, nil
 }
 
+// Each install ends with the source copied in, since uv installs the project from it.
+var pythonInstalls = map[PythonManager]func(f *Facts, uvCache []Cache) []Step{
+	PythonUv:     uvInstall,
+	PythonPip:    pipInstall,
+	PythonPoetry: poetryInstall,
+}
+
+func uvInstall(f *Facts, uvCache []Cache) []Step {
+	ws := f.UvWorkspace
+	if ws == nil {
+		return []Step{
+			Copy{Src: []string{"pyproject.toml", "uv.lock"}, Dst: "./"},
+			Run{Cmd: "uv sync --frozen --no-dev --no-install-project", Caches: uvCache},
+			copySource(),
+			Run{Cmd: "uv sync --frozen --no-dev", Caches: uvCache},
+		}
+	}
+	// Dependencies install from the manifests alone; members need their source to build.
+	manifests := []string{"pyproject.toml", "uv.lock"}
+	for _, dir := range ws.Dirs {
+		manifests = append(manifests, dir+"/pyproject.toml")
+	}
+	sync := "uv sync --frozen --no-dev --package " + shellQuote(f.Python.Name)
+	return []Step{
+		Copy{Src: manifests, Dst: "./", Parents: true},
+		Run{Cmd: sync + " --no-install-workspace", Caches: uvCache},
+		copySource(),
+		Run{Cmd: sync, Caches: uvCache},
+	}
+}
+
+// uv venv leaves pip out of the image; uv pip installs the same requirements.
+func pipInstall(f *Facts, uvCache []Cache) []Step {
+	py := f.Python
+	steps := []Step{Run{Cmd: "uv venv " + venv}}
+	if len(py.RequirementFiles) > 0 {
+		steps = append(steps,
+			Copy{Src: py.RequirementFiles, Dst: "./", Parents: true},
+			Run{Cmd: "uv pip install -r requirements.txt", Caches: uvCache})
+	} else if len(py.Requirements) > 0 {
+		steps = append(steps, Run{Cmd: "uv pip install " + shellQuote(py.Requirements...), Caches: uvCache})
+	}
+	return append(steps, copySource())
+}
+
+func poetryInstall(_ *Facts, uvCache []Cache) []Step {
+	return []Step{
+		Run{Cmd: "uv venv " + venv},
+		Env{"UV_TOOL_BIN_DIR", "/usr/local/bin"},
+		Run{Cmd: "uv tool install poetry==" + poetryVersion, Caches: uvCache},
+		Env{"POETRY_VIRTUALENVS_IN_PROJECT", "true"},
+		Env{"POETRY_NO_INTERACTION", "1"},
+		Copy{Src: []string{"pyproject.toml", "poetry.lock"}, Dst: "./"},
+		Run{Cmd: "poetry install --only main --no-root", Caches: caches("/root/.cache/pypoetry")},
+		copySource(),
+	}
+}
+
 // uvicorn can't read PORT and distroless has no shell, so Python adds --port at startup.
 const withPort = "import os, sys; os.execvp(sys.argv[1], sys.argv[1:] + ['--port', os.environ['PORT']])"
 
 // gunicorn binds to 0.0.0.0:$PORT on its own when PORT is set.
+// call is the function whose result an entry file assigns, such as app = FastAPI(). Django has
+// none and finds its module from manage.py.
 var pythonFrameworks = []struct {
-	name, dep, server string
-	cmd               func(module string) Cmd
-	module            func(py *Python) string
+	name, dep, server, call string
+	cmd                     func(module string) Cmd
 }{
-	{"Django", "django", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, djangoWSGI},
-	{"FastAPI", "fastapi", "uvicorn", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }, func(py *Python) string { return py.Apps["FastAPI"] }},
-	{"Flask", "flask", "gunicorn", func(m string) Cmd { return Cmd{"gunicorn", m} }, func(py *Python) string { return py.Apps["Flask"] }},
+	{"Django", "django", "gunicorn", "", func(m string) Cmd { return Cmd{"gunicorn", m} }},
+	{"FastAPI", "fastapi", "uvicorn", "FastAPI", func(m string) Cmd { return Cmd{"python", "-c", withPort, "uvicorn", m, "--host", "0.0.0.0"} }},
+	{"Flask", "flask", "gunicorn", "Flask", func(m string) Cmd { return Cmd{"gunicorn", m} }},
 }
 
 func pythonStart(py *Python) (Cmd, error) {
@@ -188,7 +205,10 @@ func pythonStart(py *Python) (Cmd, error) {
 		if !py.Deps[fw.dep] {
 			continue
 		}
-		module := fw.module(py)
+		module := py.Apps[fw.call]
+		if fw.call == "" {
+			module = djangoWSGI(py)
+		}
 		if module == "" {
 			continue
 		}
