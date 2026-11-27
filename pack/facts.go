@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -38,6 +40,28 @@ type Facts struct {
 	Config  Config
 	// From terril.toml, else the Procfile web: line.
 	Start string
+	// Why a provider can't build this app, keyed by provider name. Only the provider that builds
+	// fails on it, so a fastlane Gemfile.lock doesn't stop a Node app.
+	problems map[string]error
+	// The first file that exists but couldn't be read.
+	readErr error
+}
+
+func (f *Facts) cantBuild(provider string, err error) {
+	if f.problems == nil {
+		f.problems = map[string]error{}
+	}
+	f.problems[provider] = err
+}
+
+// readFile reports false for a file that isn't there. Any other failure is kept for Read to
+// return, so an unreadable go.mod isn't reported as a missing one.
+func (f *Facts) readFile(p string) (string, bool) {
+	b, err := os.ReadFile(p)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && f.readErr == nil {
+		f.readErr = err
+	}
+	return string(b), err == nil
 }
 
 func (f *Facts) Has(name string) bool {
@@ -45,8 +69,7 @@ func (f *Facts) Has(name string) bool {
 }
 
 func (f *Facts) read(name string) (string, bool) {
-	b, err := os.ReadFile(filepath.Join(f.Dir, name))
-	return string(b), err == nil
+	return f.readFile(filepath.Join(f.Dir, name))
 }
 
 func (f *Facts) root() string {
@@ -61,14 +84,13 @@ func (f *Facts) rootHas(name string) bool {
 }
 
 func (f *Facts) rootRead(name string) (string, bool) {
-	b, err := os.ReadFile(filepath.Join(f.root(), name))
-	return string(b), err == nil
+	return f.readFile(filepath.Join(f.root(), name))
 }
 
-func firstLine(dir string, names ...string) string {
+func (f *Facts) firstLine(dir string, names ...string) string {
 	for _, n := range names {
-		if b, err := os.ReadFile(filepath.Join(dir, n)); err == nil {
-			return strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
+		if s, ok := f.readFile(filepath.Join(dir, n)); ok {
+			return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
 		}
 	}
 	return ""
@@ -84,71 +106,87 @@ func Read(dir string) (*Facts, error) {
 		return nil, fmt.Errorf("%s is not a directory", dir)
 	}
 	f := &Facts{Dir: dir, Today: time.Now().UTC()}
+	// The rename hint goes first, so no other error hides it.
+	if f.Has("wolkpack.toml") {
+		return nil, fmt.Errorf("wolkpack.toml is now terril.toml; rename the file")
+	}
+	err := f.readAll()
+	// A file that couldn't be read explains any error after it, such as a missing manifest.
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (f *Facts) readAll() error {
+	dir := f.Dir
 	var err error
 	if f.Has("package.json") {
 		if f.Workspace, err = findWorkspace(dir); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if f.Node, err = readNode(f); err != nil {
-		return nil, err
+		return err
 	}
 	if f.Python, err = readPython(f); err != nil {
-		return nil, err
+		return err
 	}
 	if f.Ruby, err = readRuby(f); err != nil {
-		return nil, err
+		return err
 	}
 	if f.PHP, err = readPHP(f); err != nil {
-		return nil, err
+		return err
 	}
 	if f.DotNet, err = readDotNet(f); err != nil {
-		return nil, err
+		return err
 	}
 	if f.Rust, err = readRust(f); err != nil {
-		return nil, err
+		return err
 	}
 	if f.Python != nil && f.Workspace == nil {
 		if f.UvWorkspace, err = findUvWorkspace(dir); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if ws := f.UvWorkspace; ws != nil {
 		if !fileExists(filepath.Join(ws.Root, "uv.lock")) {
-			return nil, fmt.Errorf("the uv workspace at %s has no uv.lock; run uv lock there", ws.Root)
+			f.cantBuild("python", fmt.Errorf("the uv workspace at %s has no uv.lock; run uv lock there", ws.Root))
 		}
 		if f.Python.Name == "" {
-			return nil, fmt.Errorf("%s/pyproject.toml has no project name, which uv needs to select it", ws.App)
+			f.cantBuild("python", fmt.Errorf("%s/pyproject.toml has no project name, which uv needs to select it", ws.App))
 		}
 		f.Python.Manager = "uv"
-		if v := firstLine(ws.Root, ".python-version"); v != "" && !f.Has(".python-version") {
+		if v := f.firstLine(ws.Root, ".python-version"); v != "" && !f.Has(".python-version") {
 			f.Python.Version = v
 		}
 	}
 	if s, ok := f.read("go.mod"); ok {
 		if f.Go, err = modfile.Parse("go.mod", []byte(s), nil); err != nil {
-			return nil, err
+			return err
 		}
 		if f.GoCgo, err = goUsesCgo(f); err != nil {
-			return nil, err
+			return err
 		}
-		f.GoMains = goMains(f)
+		if f.GoMains, err = goMains(f); err != nil {
+			return err
+		}
 	}
 	if s, ok := f.read("Procfile"); ok {
 		f.Start = procfileWeb(s)
 	}
-	if f.Has("wolkpack.toml") {
-		return nil, fmt.Errorf("wolkpack.toml is now terril.toml; rename the file")
-	}
 	if s, ok := f.read("terril.toml"); ok {
 		if f.Config, err = parseConfig(s); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if f.Config.Start != "" {
 		f.Start = f.Config.Start
 	}
-	return f, nil
+	return nil
 }
 
 type Node struct {
@@ -245,9 +283,9 @@ func readNode(f *Facts) (*Node, error) {
 			n.PnP = yarnrc.NodeLinker != "node-modules" && yarnrc.NodeLinker != "pnpm"
 		}
 	}
-	n.Version = strings.TrimPrefix(firstLine(f.Dir, ".nvmrc", ".node-version"), "v")
+	n.Version = strings.TrimPrefix(f.firstLine(f.Dir, ".nvmrc", ".node-version"), "v")
 	if n.Version == "" && f.Workspace != nil {
-		n.Version = strings.TrimPrefix(firstLine(f.Workspace.Root, ".nvmrc", ".node-version"), "v")
+		n.Version = strings.TrimPrefix(f.firstLine(f.Workspace.Root, ".nvmrc", ".node-version"), "v")
 	}
 	if n.Version == "" || strings.HasPrefix(n.Version, "lts") {
 		n.Version = n.Package.Engines.Node
@@ -354,7 +392,10 @@ func validPatterns(file string, patterns []string) error {
 }
 
 func workspacePatterns(dir string) ([]string, error) {
-	if b, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml")); err == nil {
+	if b, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml")); !errors.Is(err, fs.ErrNotExist) {
+		if err != nil {
+			return nil, err
+		}
 		var ws struct {
 			Packages []string `yaml:"packages"`
 		}
@@ -364,8 +405,10 @@ func workspacePatterns(dir string) ([]string, error) {
 		return ws.Packages, validPatterns(filepath.Join(dir, "pnpm-workspace.yaml"), ws.Packages)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
+	} else if err != nil {
+		return nil, err
 	}
 	var pkg struct {
 		Workspaces json.RawMessage `json:"workspaces"`
@@ -513,7 +556,7 @@ func readPython(f *Facts) (*Python, error) {
 	case f.Has("poetry.lock"):
 		py.Manager = "poetry"
 	}
-	if v := firstLine(f.Dir, ".python-version"); v != "" {
+	if v := f.firstLine(f.Dir, ".python-version"); v != "" {
 		py.Version = v
 	}
 	for _, file := range []string{"main.py", "app.py", "wsgi.py"} {
@@ -573,7 +616,11 @@ func findUvWorkspace(dir string) (*Workspace, error) {
 		return nil, err
 	}
 	for _, parent := range parentsInRepo(app) {
-		if b, err := os.ReadFile(filepath.Join(parent, "pyproject.toml")); err == nil {
+		b, err := os.ReadFile(filepath.Join(parent, "pyproject.toml"))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		if err == nil {
 			var doc struct {
 				Tool struct {
 					Uv struct {
@@ -644,7 +691,8 @@ func readRuby(f *Facts) (*Ruby, error) {
 	}
 	lock, ok := f.read("Gemfile.lock")
 	if !ok {
-		return nil, fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it")
+		f.cantBuild("ruby", fmt.Errorf("no Gemfile.lock next to the Gemfile; run bundle lock and commit it"))
+		return &Ruby{}, nil
 	}
 	r := &Ruby{Gems: map[string]bool{}}
 	for _, m := range lockGemRe.FindAllStringSubmatch(lock, -1) {
@@ -655,11 +703,14 @@ func readRuby(f *Facts) (*Ruby, error) {
 		sections[m[1]] = strings.Fields(m[2])
 	}
 	platforms := sections["PLATFORMS"]
-	if !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }) {
-		return nil, fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
-			strings.Join(platforms, ", "))
+	switch {
+	case len(platforms) == 0:
+		f.cantBuild("ruby", fmt.Errorf("the Gemfile.lock lists no platforms; run bundle lock --add-platform x86_64-linux aarch64-linux"))
+	case !slices.ContainsFunc(platforms, func(p string) bool { return p == "ruby" || strings.Contains(p, "-linux") }):
+		f.cantBuild("ruby", fmt.Errorf("the Gemfile.lock only lists %s; run bundle lock --add-platform x86_64-linux aarch64-linux",
+			strings.Join(platforms, ", ")))
 	}
-	if v := firstLine(f.Dir, ".ruby-version"); v != "" {
+	if v := f.firstLine(f.Dir, ".ruby-version"); v != "" {
 		r.Version = rubyVersionNumber.FindString(v)
 	} else if v := sections["RUBY VERSION"]; len(v) > 1 {
 		r.Version = rubyVersionNumber.FindString(v[1])
@@ -684,7 +735,8 @@ func readPHP(f *Facts) (*PHP, error) {
 		p.DocRoot = "public"
 	case f.Has("index.php"):
 	case p.Composer:
-		return nil, fmt.Errorf("composer.json found, but no index.php in public/ or the app root")
+		f.cantBuild("php", fmt.Errorf("composer.json found, but no index.php in public/ or the app root"))
+		return p, nil
 	default:
 		return nil, nil
 	}
@@ -693,7 +745,8 @@ func readPHP(f *Facts) (*PHP, error) {
 	}
 	lock, ok := f.read("composer.lock")
 	if !ok {
-		return nil, fmt.Errorf("composer.json has no composer.lock; run composer update and commit it")
+		f.cantBuild("php", fmt.Errorf("composer.json has no composer.lock; run composer update and commit it"))
+		return p, nil
 	}
 	var doc struct {
 		Packages []struct {
@@ -768,25 +821,24 @@ func readDotNet(f *Facts) (*DotNet, error) {
 	}
 	// The project at the app root wins. Otherwise the only web project does, so a solution with
 	// one API and its test projects builds the API.
+	atRoot := slices.DeleteFunc(slices.Clone(projects), func(p string) bool { return strings.Contains(p, "/") })
 	var project string
-	for _, p := range projects {
-		if !strings.Contains(p, "/") {
-			if project != "" {
-				return nil, fmt.Errorf("several .NET projects at the app root (%s); keep one", strings.Join(projects, ", "))
-			}
-			project = p
-		}
-	}
 	switch {
-	case project != "":
+	case len(atRoot) > 1:
+		f.cantBuild("dotnet", fmt.Errorf("several .NET projects at the app root (%s); keep one", strings.Join(atRoot, ", ")))
+		return &DotNet{}, nil
+	case len(atRoot) == 1:
+		project = atRoot[0]
 	case len(web) == 1:
 		project = web[0]
 	case len(web) > 1:
-		return nil, fmt.Errorf("several .NET web projects (%s); point terril at the folder of the one to build", strings.Join(web, ", "))
+		f.cantBuild("dotnet", fmt.Errorf("several .NET web projects (%s); point terril at the folder of the one to build", strings.Join(web, ", ")))
+		return &DotNet{}, nil
 	case len(projects) == 1:
 		project = projects[0]
 	default:
-		return nil, fmt.Errorf("several .NET projects (%s); point terril at the folder of the one to build", strings.Join(projects, ", "))
+		f.cantBuild("dotnet", fmt.Errorf("several .NET projects (%s); point terril at the folder of the one to build", strings.Join(projects, ", ")))
+		return &DotNet{}, nil
 	}
 
 	c := parsed[project]
@@ -851,12 +903,13 @@ func readRust(f *Facts) (*Rust, error) {
 	if !ok {
 		return nil, nil
 	}
-	if !f.Has("Cargo.lock") {
-		return nil, fmt.Errorf("no Cargo.lock next to Cargo.toml; run cargo generate-lockfile and commit it")
-	}
 	var manifest cargoToml
 	if _, err := toml.Decode(root, &manifest); err != nil {
-		return nil, fmt.Errorf("reading Cargo.toml: %w", err)
+		return nil, fmt.Errorf("%s: %w", filepath.Join(f.Dir, "Cargo.toml"), err)
+	}
+	if !f.Has("Cargo.lock") {
+		f.cantBuild("rust", fmt.Errorf("no Cargo.lock next to Cargo.toml; run cargo generate-lockfile and commit it"))
+		return &Rust{}, nil
 	}
 	if manifest.Package != nil && manifest.Package.DefaultRun != "" {
 		return &Rust{Package: manifest.Package.Name, Bin: manifest.Package.DefaultRun, Toolchain: rustToolchain(f)}, nil
@@ -864,7 +917,10 @@ func readRust(f *Facts) (*Rust, error) {
 	dirs := []string{"."}
 	if manifest.Workspace != nil {
 		for _, pattern := range manifest.Workspace.Members {
-			matches, _ := filepath.Glob(filepath.Join(f.Dir, pattern, "Cargo.toml"))
+			matches, err := filepath.Glob(filepath.Join(f.Dir, pattern, "Cargo.toml"))
+			if err != nil {
+				return nil, fmt.Errorf("%s: workspace member %q: %w", filepath.Join(f.Dir, "Cargo.toml"), pattern, err)
+			}
 			for _, m := range matches {
 				rel, _ := filepath.Rel(f.Dir, filepath.Dir(m))
 				if rel = filepath.ToSlash(rel); !slices.Contains(dirs, rel) {
@@ -915,7 +971,8 @@ func readRust(f *Facts) (*Rust, error) {
 	}
 	switch len(bins) {
 	case 0:
-		return nil, fmt.Errorf("no Rust binary: add src/main.rs or a [[bin]] to Cargo.toml")
+		f.cantBuild("rust", fmt.Errorf("no Rust binary: add src/main.rs or a [[bin]] to Cargo.toml"))
+		return &Rust{}, nil
 	case 1:
 		return &Rust{Package: bins[0].pkg, Bin: bins[0].name, Toolchain: rustToolchain(f)}, nil
 	}
@@ -929,10 +986,12 @@ func readRust(f *Facts) (*Rust, error) {
 			names = append(names, b.pkg+"/"+b.name)
 		}
 		slices.Sort(names)
-		return nil, fmt.Errorf("several Rust binaries (%s); set default-run in the [package] of the one to build", strings.Join(names, ", "))
+		f.cantBuild("rust", fmt.Errorf("several Rust binaries (%s); set default-run in the [package] of the one to build", strings.Join(names, ", ")))
+		return &Rust{}, nil
 	}
 	slices.Sort(names)
-	return nil, fmt.Errorf("several Rust binaries (%s); set default-run in Cargo.toml", strings.Join(names, ", "))
+	f.cantBuild("rust", fmt.Errorf("several Rust binaries (%s); set default-run in Cargo.toml", strings.Join(names, ", ")))
+	return &Rust{}, nil
 }
 
 func rustToolchain(f *Facts) string {
@@ -981,17 +1040,17 @@ func goUsesCgo(f *Facts) (bool, error) {
 	return found, err
 }
 
-func goMains(f *Facts) []string {
+func goMains(f *Facts) ([]string, error) {
 	if f.Has("main.go") {
-		return []string{"."}
+		return []string{"."}, nil
 	}
-	files, _ := filepath.Glob(filepath.Join(f.Dir, "cmd", "*", "main.go"))
+	files, err := filepath.Glob(filepath.Join(f.Dir, "cmd", "*", "main.go"))
 	var mains []string
 	for _, file := range files {
 		rel, _ := filepath.Rel(f.Dir, filepath.Dir(file))
 		mains = append(mains, "./"+filepath.ToSlash(rel))
 	}
-	return mains
+	return mains, err
 }
 
 func procfileWeb(s string) string {

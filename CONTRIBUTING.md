@@ -67,6 +67,7 @@ A test app can also have these files:
 - `app` names a subfolder to build, for monorepos.
 - `absent` lists package names that must not be in the image.
 - `git-root` names a folder of the app that the test makes the root of a git repository, since git can't commit a `.git` folder.
+- `unreadable` lists files that the test makes unreadable before the build.
 - `absent-files` lists paths that must not be in the image, such as `srv/.env`.
 - `run-env` holds `KEY=VALUE` lines that the test passes to `docker run -e`, for values a platform sets at runtime, such as secrets.
 - `build-env` holds `KEY=VALUE` lines that the test passes with `--env`. It builds once with other values first, so a cached build fails the test. A line that starts with `secret ` must not appear anywhere in the image. Add `build-env` to the app's `.dockerignore`. No `--env` value may appear in the image's history or config.

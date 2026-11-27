@@ -75,7 +75,7 @@ func (rv runtimeVersions) pick(want string, today time.Time) (string, error) {
 	if exactVersionRe.MatchString(want) {
 		v, err := semver.NewVersion(want)
 		if err != nil {
-			return "", fmt.Errorf("can't read %s version %q", rv.name, want)
+			return "", fmt.Errorf("can't read %s version %q: %w", rv.name, want, err)
 		}
 		r, ok := rv.release(want)
 		switch {
@@ -100,7 +100,7 @@ func (rv runtimeVersions) pick(want string, today time.Time) (string, error) {
 		normalized = strings.NewReplacer("==", "=", ".*", ".x").Replace(normalized)
 		var err error
 		if c, err = semver.NewConstraint(normalized); err != nil {
-			return "", fmt.Errorf("can't read %s version %q", rv.name, want)
+			return "", fmt.Errorf("can't read %s version %q: %w", rv.name, want, err)
 		}
 	}
 	supported := rv.supported(today)

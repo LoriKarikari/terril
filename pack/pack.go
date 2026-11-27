@@ -45,6 +45,9 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := f.problems[primary.name]; err != nil {
+		return nil, err
+	}
 
 	plan := &Plan{Provider: primary.name, Context: f.Dir}
 	if f.Workspace != nil {
@@ -66,6 +69,9 @@ func New(f *Facts, forceProvider string) (*Plan, error) {
 	for _, p := range withRole(roles, Assets) {
 		if p.name == primary.name {
 			continue
+		}
+		if err := f.problems[p.name]; err != nil {
+			return nil, err
 		}
 		name := "assets-" + p.name
 		s, err := p.assetStage(f, name)
@@ -156,8 +162,12 @@ func pickPrimary(roles map[string]Role, force string) (provider, error) {
 	for _, p := range candidates {
 		names = append(names, p.name)
 	}
-	return provider{}, fmt.Errorf("both %s can run this app; pick one with --provider %s",
-		strings.Join(names, " and "), strings.Join(names, "|"))
+	if len(names) == 2 {
+		return provider{}, fmt.Errorf("both %s can run this app; pick one with --provider %s",
+			strings.Join(names, " and "), strings.Join(names, "|"))
+	}
+	return provider{}, fmt.Errorf("several providers can run this app (%s); pick one with --provider %s",
+		strings.Join(names, ", "), strings.Join(names, "|"))
 }
 
 func providerNames() []string {

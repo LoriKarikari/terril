@@ -100,6 +100,7 @@ type fixture struct {
 	absent      []string
 	absentFiles []string
 	gitRoot     string
+	unreadable  []string
 	excludes    []string
 	buildEnv    []string
 	secrets     []string
@@ -135,6 +136,7 @@ func fixtures(t *testing.T) []fixture {
 		f.absent = readLines(t, root, "absent")
 		f.absentFiles = readLines(t, root, "absent-files")
 		f.gitRoot, _ = readFile(t, root, "git-root")
+		f.unreadable = readLines(t, root, "unreadable")
 		f.excludes = readLines(t, root, "context-excludes")
 		f.runEnv = readLines(t, root, "run-env")
 		for _, line := range readLines(t, root, "build-env") {
@@ -239,8 +241,9 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 	log := newLog(t, f.name+".log")
 	keepUntilEnd(image)
 
+	dir := copyApp(t, f)
 	if f.expectError != "" {
-		out, err := f.run(log, "build", "-t", image, f.dir)
+		out, err := f.run(log, "build", "-t", image, dir)
 		switch {
 		case err == nil:
 			r.fail(t, "build succeeded but should have failed")
@@ -252,7 +255,6 @@ func testApp(t *testing.T, f fixture, r *appResult) {
 		return
 	}
 
-	dir := copyApp(t, f)
 	if f.excludes != nil {
 		facts, err := pack.Read(dir)
 		if err != nil {
@@ -416,6 +418,11 @@ func copyApp(t *testing.T, f fixture) string {
 	}
 	if f.gitRoot != "" {
 		if err := os.Mkdir(filepath.Join(work, f.gitRoot, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range f.unreadable {
+		if err := os.Chmod(filepath.Join(work, name), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
